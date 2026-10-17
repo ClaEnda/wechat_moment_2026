@@ -60,7 +60,9 @@ class DatabaseDecrypter:
             # 关闭目标数据库连接
             target_conn.close()
 
-    def decrypt(self):
+    def decrypt(self) -> bool:
+        if self.gui.account_info and self.gui.account_info.get("weixin4"):
+            return self._decrypt_weixin4()
 
         output_dir = 'app/DataBase/Msg'
         os.makedirs(output_dir, exist_ok=True)
@@ -99,5 +101,29 @@ class DatabaseDecrypter:
         # 解密完成 放开下一步按钮
         self.gui.decrypt_note_text.set("复制成功，请点击下一步")
         self.gui.next_step_button.config(state=tkinter.NORMAL)
+        return True
+
+    def _decrypt_weixin4(self) -> bool:
+        from decrypter.weixin4 import Weixin4Error, build_export_databases
+
+        def progress(value, text):
+            self.gui.update_decrypt_progressbar(value)
+            if text:
+                self.gui.decrypt_note_text.set(text)
+
+        try:
+            build_export_databases(self.gui.account_info, progress)
+        except Weixin4Error as exc:
+            LOG.error(str(exc))
+            self.gui.decrypt_note_text.set(str(exc))
+            self.gui.next_step_button.config(state=tkinter.NORMAL)
+            return False
+        except Exception:
+            LOG.error(traceback.format_exc())
+            self.gui.decrypt_note_text.set("读取微信 4.1 数据失败")
+            self.gui.next_step_button.config(state=tkinter.NORMAL)
+            return False
+        self.gui.next_step_button.config(state=tkinter.NORMAL)
+        return True
 
 

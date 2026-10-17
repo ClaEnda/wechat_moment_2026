@@ -1,6 +1,8 @@
 import datetime
+import hashlib
 import json
 import shutil
+import tempfile
 import threading
 import time
 from typing import Tuple
@@ -93,7 +95,7 @@ class HtmlExporter(threading.Thread):
         self.gui = gui
         self.avatar_exporter = AvatarExporter(dir_name)
         self.image_exporter = ImageExporter(dir_name)
-        self.video_exporter = VideoExporter(dir_name)
+        self.video_exporter = VideoExporter(dir_name, convert_video)
         self.html_head = None
         self.html_end = None
         self.file = None
@@ -105,9 +107,185 @@ class HtmlExporter(threading.Thread):
         self.end_date = end_date
         self.convert_video = convert_video
         self.stop_flag = False
+        self._owner_image_md5: set[str] = set()
         super().__init__()
 
+    def _load_earlier_moments(self) -> None:
+        """开始日期早于本地缓存时，滚动已打开的朋友圈并重新复制数据库。"""
+        account = getattr(self.gui, "account_info", None) or {}
+        if not account.get("weixin4"):
+            return
+        earliest = self._earliest_local_date()
+        if earliest and earliest <= self.begin_date:
+            return
+
+        from helper.moments_window import find_moments_window
+
+        hwnd = find_moments_window()
+        if not hwnd:
+            self._warn_cached_range(earliest, False)
+            return
+
+        stop_scroll = threading.Event()
+        holder = {"hwnd": hwnd}
+
+        def pump():
+            while not stop_scroll.is_set() and not self.stop_flag:
+                holder["hwnd"] = self._scroll_once(holder["hwnd"])
+                time.sleep(0.6)
+
+        worker = threading.Thread(target=pump, daemon=True)
+        self._bring_moments_forward(hwnd)
+        worker.start()
+        last = earliest
+        stall = 0
+        try:
+            while not self.stop_flag and stall < 3:
+                shown = last.strftime("%Y-%m-%d") if last else "未知"
+                self.gui.show_export_warning(f"正在向前浏览朋友圈，本地最早到 {shown}")
+                self._wait_scroll(12)
+                if self.stop_flag or not holder["hwnd"]:
+                    break
+                try:
+                    self._refresh_local_databases()
+                except Exception:
+                    LOG.error("更新本地朋友圈失败")
+                    self._reopen_local_databases()
+                    break
+                earliest = self._earliest_local_date()
+                if earliest and earliest <= self.begin_date:
+                    self.gui.show_export_warning("")
+                    return
+                if earliest == last:
+                    stall += 1
+                else:
+                    stall = 0
+                    last = earliest
+            if not self.stop_flag:
+                self._warn_cached_range(self._earliest_local_date() or last, bool(holder["hwnd"]))
+        finally:
+            stop_scroll.set()
+            worker.join(timeout=2)
+
+    def _scroll_once(self, hwnd: int) -> int:
+        import pywintypes
+        import win32gui
+
+        from helper.moments_window import find_moments_window, scroll_moments
+
+        if not hwnd or not win32gui.IsWindow(hwnd):
+            hwnd = find_moments_window()
+        if not hwnd:
+            return 0
+        try:
+            scroll_moments(hwnd, 10)
+        except pywintypes.error:
+            return find_moments_window()
+        return hwnd
+
+    def _bring_moments_forward(self, hwnd: int) -> None:
+        import win32con
+        import win32gui
+
+        try:
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            win32gui.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
+
+    def _wait_scroll(self, seconds: float) -> None:
+        end = time.time() + seconds
+        while time.time() < end and not self.stop_flag:
+            time.sleep(0.2)
+
+    def _refresh_local_databases(self) -> None:
+        from decrypter.weixin4 import build_export_databases
+
+        previous = self._earliest_local_date()
+        sns_path = os.path.join("app", "DataBase", "Msg", "Sns.db")
+        backup = self._backup_sns(sns_path)
+        self._close_local_databases()
+
+        def progress(value, _text):
+            self.gui.update_export_progressbar(min(int(value), 20))
+
+        try:
+            build_export_databases(self.gui.account_info, progress)
+        except Exception:
+            self._restore_sns(backup, sns_path)
+            self._reopen_local_databases()
+            raise
+        self._reopen_local_databases()
+        current = self._earliest_local_date()
+        if previous and (current is None or current > previous):
+            self._close_local_databases()
+            self._restore_sns(backup, sns_path)
+            self._reopen_local_databases()
+            raise RuntimeError("刷新后的朋友圈比原来更少")
+        self._discard_backup(backup)
+
+    def _backup_sns(self, sns_path: str):
+        if not os.path.isfile(sns_path):
+            return None
+        fd, backup = tempfile.mkstemp(prefix="sns-scroll-", suffix=".db")
+        os.close(fd)
+        try:
+            shutil.copy2(sns_path, backup)
+        except Exception:
+            os.remove(backup)
+            raise
+        return backup
+
+    def _restore_sns(self, backup, sns_path: str) -> None:
+        if backup and os.path.isfile(backup):
+            shutil.copy2(backup, sns_path)
+            os.remove(backup)
+
+    def _discard_backup(self, backup) -> None:
+        if backup and os.path.isfile(backup):
+            os.remove(backup)
+
+    def _close_local_databases(self) -> None:
+        from app.DataBase import micro_msg_db, msg_db, sns_db
+
+        for database in (sns_db, micro_msg_db, msg_db):
+            database.close()
+
+    def _reopen_local_databases(self) -> None:
+        from app.DataBase import micro_msg_db, msg_db, sns_db
+
+        for database in (sns_db, micro_msg_db, msg_db):
+            if not database.open_flag:
+                database.init_database()
+
+    def _earliest_local_date(self):
+        from app.DataBase import sns_db
+
+        if not sns_db.open_flag:
+            sns_db.init_database()
+        stamp = sns_db.get_earliest_timestamp()
+        if not stamp:
+            return None
+        if stamp > 10**12:
+            stamp = stamp / 1000
+        return datetime.datetime.fromtimestamp(stamp).date()
+
+    def _warn_cached_range(self, earliest, window_open: bool) -> None:
+        if earliest:
+            shown = earliest.strftime("%Y-%m-%d")
+            if window_open:
+                text = f"本地朋友圈只缓存到 {shown}，更早的内容还没有加载进来"
+            else:
+                text = f"朋友圈窗口未打开，本地最早只到 {shown}。请打开朋友圈窗口后重新导出"
+        else:
+            text = "本地还没有朋友圈记录。请打开朋友圈窗口后重新导出"
+        self.gui.show_export_warning(text)
+
     def run(self) -> None:
+        self._load_earlier_moments()
+        if self.stop_flag:
+            self.gui.export_succeed()
+            return
 
         # 创建excel文件
         self.outwb = Workbook()
@@ -133,26 +311,25 @@ class HtmlExporter(threading.Thread):
             self.html_head, self.html_end = content.split("/*内容分割线*/")
         self.file = open(f"output/{self.dir_name}/index.html", "w", encoding="utf-8")
 
-        if self.gui.account_info and self.gui.account_info.get("wxid"):
-            self.avatar_exporter.get_avatar_path(self.gui.account_info.get("wxid"))
-            self.html_head = self.html_head.replace(
-                "{my_wxid}", f"{self.gui.account_info.get('wxid')}"
-            )
+        my_name = ""
+        my_avatar = ""
+        wxid = ""
+        if self.gui.account_info:
+            wxid = self.gui.account_info.get("wxid") or ""
+        if wxid:
+            my_avatar = self.avatar_exporter.get_avatar_path(wxid) or ""
             from app.DataBase import micro_msg_db
 
-            my_info = micro_msg_db.get_contact_by_username(
-                self.gui.account_info.get("wxid")
-            )
-            self.html_head = self.html_head.replace("{my_name}", f"{my_info[4]}")
-
-        from app.DataBase import sns_db
-
-        cover_url = sns_db.get_cover_url()
-        if cover_url:
-            cover_path = self.image_exporter.save_image((cover_url, "", ""), "image")
-            self.html_head = self.html_head.replace("{cover_path}", cover_path)
+            my_info = micro_msg_db.get_contact_by_username(wxid)
+            if my_info and len(my_info) > 4 and my_info[4]:
+                my_name = str(my_info[4])
+        self.html_head = self.html_head.replace("{my_avatar}", my_avatar)
+        self.html_head = self.html_head.replace("{my_wxid}", "")
+        self.html_head = self.html_head.replace("{my_name}", my_name)
 
         self.file.write(self.html_head)
+        from app.DataBase import sns_db
+
         # 加一天
         end_date = self.end_date + datetime.timedelta(days=1)
         begin_time = time.mktime(
@@ -177,10 +354,13 @@ class HtmlExporter(threading.Thread):
                 if message_data[0] in self.contacts_map:
                     comments_datas = sns_db.get_comment_by_feed_id(message_data[2])
                     comments: list[Comment] = []
-                    for c in comments_datas:
+                    for c in comments_datas or []:
                         contact = Comment(c[0], c[1], c[2])
                         comments.append(contact)
-                    self.export_msg(message_data[1], comments, self.contacts_map)
+                    try:
+                        self.export_msg(message_data[1], comments, self.contacts_map)
+                    except Exception:
+                        LOG.error("跳过一条无法解析的朋友圈")
                     # 更新进度条 前30%视频处理  后70%其他处理
                     progress = round(index / len(message_datas) * 70)
                     self.gui.update_export_progressbar(30 + progress)
@@ -191,12 +371,78 @@ class HtmlExporter(threading.Thread):
     def stop(self) -> None:
         self.stop_flag = True
 
+    def _remember_owner_images(self, username: str, images: list[Tuple]) -> None:
+        wxid = ""
+        if self.gui and getattr(self.gui, "account_info", None):
+            wxid = self.gui.account_info.get("wxid") or ""
+        if not wxid or username != wxid:
+            return
+        for _thumb_path, image_path in images:
+            file_path = Path(f"output/{self.dir_name}") / image_path
+            try:
+                self._owner_image_md5.add(hashlib.md5(file_path.read_bytes()).hexdigest())
+            except OSError:
+                continue
+
+    def _resolve_cover_path(self) -> str:
+        """数据库里的封面地址优先。否则用和自己动态同一张图的本地背景，避开别人的缓存。"""
+        from app.DataBase import sns_db
+
+        cover_url = sns_db.get_cover_url()
+        if cover_url:
+            saved = self.image_exporter.save_image((cover_url, "", ""), "image")
+            if saved:
+                return saved
+        return self._cover_from_local_bkg()
+
+    def _cover_from_local_bkg(self) -> str:
+        account = ""
+        if self.gui and getattr(self.gui, "account_info", None):
+            account = self.gui.account_info.get("filePath") or ""
+        if not account:
+            return ""
+        bkg_dir = Path(account) / "business" / "sns" / "bkg"
+        if not bkg_dir.is_dir():
+            return ""
+        cached = []
+        for file in bkg_dir.rglob("*"):
+            if not file.is_file():
+                continue
+            try:
+                data = file.read_bytes()
+                mtime = file.stat().st_mtime
+            except OSError:
+                continue
+            if not data.startswith(b"\xff\xd8\xff"):
+                continue
+            cached.append((mtime, hashlib.md5(data).hexdigest(), data))
+        if not cached:
+            return ""
+        images_dir = Path(f"output/{self.dir_name}/images")
+        images_dir.mkdir(parents=True, exist_ok=True)
+        exported = {}
+        for existing in images_dir.iterdir():
+            if not existing.is_file() or existing.name == "cover.jpg":
+                continue
+            try:
+                exported[hashlib.md5(existing.read_bytes()).hexdigest()] = existing.name
+            except OSError:
+                continue
+        owner_hits = [item for item in cached if item[1] in self._owner_image_md5]
+        exported_hits = [item for item in cached if item[1] in exported]
+        pool = owner_hits or exported_hits or cached
+        _mtime, digest, data = max(pool, key=lambda item: item[0])
+        if digest in exported:
+            return f"images/{exported[digest]}"
+        destination = images_dir / "cover.jpg"
+        destination.write_bytes(data)
+        return "images/cover.jpg"
+
     def export_msg(
         self, message: str, comments: list[Comment], contacts_map: dict[str, Contact]
     ) -> None:
 
-        LOG.info(message)
-        # print("message:",message)
+        LOG.info("导出一条朋友圈")
         # force_list: 强制要求转media为list
         msg_dict = xmltodict.parse(message, force_list={"media"})
         msg_json = json.dumps(msg_dict)
@@ -211,6 +457,7 @@ class HtmlExporter(threading.Thread):
         remark = contact.remark if contact.remark else contact.nickName
         # 朋友圈图片
         images = self.image_exporter.get_images(msg)
+        self._remember_owner_images(username, images)
         # 朋友圈视频
         videos = self.video_exporter.get_videos(msg)
         # 样式   3:链接样式
@@ -276,8 +523,8 @@ class HtmlExporter(threading.Thread):
             html += f'  <a href="{msg.timelineObject.ContentObject.contentUrl}" target="_blank">\n'
             html += '      <div class ="out_link" >\n'
             if images:
-                thumb_path, image_path = images[0]
-                html += f'        <img src = "{thumb_path}"/>\n'
+                _thumb_path, image_path = images[0]
+                html += f'        <img src="{image_path}"/>\n'
             html += f'       <div class ="text" >{msg.timelineObject.ContentObject.title}</div>\n'
             html += "      </div >\n"
             html += "   </a>\n"
@@ -329,8 +576,8 @@ class HtmlExporter(threading.Thread):
             html += "      <div>\n"
             for video_path in videos:
                 html += f'     <video controls height="500">\n'
-                html += f'        <source  src="{video_path}" type="video/mp4">\n'
-                html += f"     <video>\n"
+                html += f'        <source src="{video_path}" type="video/mp4">\n'
+                html += "     </video>\n"
             html += "      </div>\n"
 
         html += '          <div class="texts_box">\n'
@@ -345,3 +592,8 @@ class HtmlExporter(threading.Thread):
     def finish_file(self):
         self.file.write(self.html_end)
         self.file.close()
+        html_path = Path(f"output/{self.dir_name}/index.html")
+        text = html_path.read_text(encoding="utf-8")
+        if "{cover_path}" in text:
+            text = text.replace("{cover_path}", self._resolve_cover_path())
+            html_path.write_text(text, encoding="utf-8")

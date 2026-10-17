@@ -4,95 +4,79 @@
 
 # 一、项目介绍
 
-
-## 0. 求助
-四月底微信对朋友圈图片进行了加密，如果知道如何解密的大佬请指点一下。（帮忙Issue或者PR）
-通过抓包可知朋友圈图片是这样一个请求，现在问题是请求过来的数据不知道是怎么加密的
-http://shmmsns.qpic.cn/mmsns/uGxMq1C4wvppcjBbyweK796GtT1hH3LGISYajZ2v7C11XhHk5icyDUXcWNSPk2MooeIa8Es5hXP0/0?idx=1&token=WSEN6qDsKwV8A02w3onOGQYfxnkibdqSOkmHhZGNB4DFumlE9p1vp0e0xjHoXlbbXRzwnQia6X5t3Annc4oqTuDg
-<br>
-加密后字节数与原图片一致，可能是某种流式数据加密。key可能是11079841251888681493。
-
 ## 1. 项目简介
 
-* [WechatMoments](https://github.com/tech-shrimp/WechatMoments)是一款运行在Windows上的，备份导出朋友圈为html的工具
-* 作者：[技术爬爬虾](https://space.bilibili.com/316183842)（B站 抖音 Youtube同名）更多有趣实用项目请关注
+* 本仓库是 [WechatMoments](https://github.com/tech-shrimp/WechatMoments) 的 fork，在原项目上适配了微信 4.1：从已登录的微信读取朋友圈，导出为可离线打开的 HTML。
+* 原作者：[技术爬爬虾](https://space.bilibili.com/316183842)（B站、抖音、Youtube 同名）
 * 开源许可: Apache License
-* 分发，宣传，二次开发等请注明原作者
+* 分发、宣传、二次开发请注明原作者
 
 ## 2. 使用说明
-* ### [视频演示-Bilibili](https://www.bilibili.com/video/BV1qq421A7aF/)
-* (1) 安装[Windows版微信](https://pc.weixin.qq.com/)，并且登陆
-* (2) 在[Releases](https://github.com/tech-shrimp/WechatMoments/releases)下载压缩包wechat_moments.zip 
-* (3) 解压文件夹（路径不要包含中文）
-* (4) 管理员身份运行wechat_moments.exe，并按提示操作
-* (5) 如发生异常，重启微信，重启软件
+
+1. 安装 [Windows 版微信](https://pc.weixin.qq.com/) 并登录。本 fork 按微信 4.1 使用。
+2. 准备要导出的内容，自己打开对应的朋友圈窗口：
+   * 要所有人：打开自己的朋友圈。
+   * 要某个人：打开那个人的朋友圈。
+3. 点「自动浏览当前朋友圈」。程序只滚动这个已经打开的窗口，不会自己搜索。窗口没打开时会提示先打开。
+4. 点「下一步」，把微信里已经加载的朋友圈复制到本机。请保持微信登录。
+5. 在左侧勾选联系人，设置开始日期和截止日期，点「开始导出」。
+6. 导出结束后点「打开文件夹」，用浏览器打开其中的 `index.html`。
+
+最近的内容如果已经在微信里，可以跳过第 2、3 步，直接点「下一步」。开始日期早于本机已有记录、并且朋友圈窗口开着时，导出前会再向前滚动并重新读取。
+
+从源码运行见下方「二次开发」。原作者发布的 exe 不包含本 fork 的微信 4.1 改动。
 
 # 二. 详细介绍
 
 ## 1. 核心功能
 
-* 导出微信朋友圈数据为HTML
-* 可以下载图片/视频离线查看，永久保存
-* 可以根据联系人，朋友圈时间进行过滤导出
-* 强依赖微信Windows客户端，只提供windows版本
-* 只测试过python3.11+Win10/Win11，其他环境随缘
-* 软件只能导出在电脑微信**浏览过**的朋友圈记录
-* 浏览朋友圈方法，参考[电脑微信浏览朋友圈](/doc/manual_guide.md)
-* ![主界面.png](/doc/pic/主界面.png)
+* 导出微信朋友圈为 HTML
+* 下载图片和视频，离线查看
+* 按联系人和时间范围筛选
+* 只提供 Windows 版本，依赖电脑版微信
+* 在 Python 3.11、Windows 10/11 上使用
+* 只能导出微信已经加载到本地的记录。加载方法见 [电脑微信浏览朋友圈](/doc/manual_guide.md)
 
 ## 2. 已知问题
 
-* 视频下载不稳定，视频可能不全（如有解决方案欢迎PR）
-* 只能开小号导出自己朋友圈（如有解决方案欢迎PR）
-* HTML页面比较原始
-* 自动浏览朋友圈的功能不稳定（如有解决方案欢迎PR）
-
+* 朋友圈窗口没被滚动到的更早内容，不会出现在导出里
+* 视频默认是 H.265。不支持这种格式的浏览器可能无法播放，可在导出时勾选「视频转码」
+* HTML 页面仍然比较简单
 
 ## 3. 常见问题与解决方法
-问：图片为什么无法导出
-- 答：2024年5月微信对图片进行了加密，2024年后的朋友圈数据清先浏览朋友圈，点开图片缓存到本地，再使用此工具才能导出图片。
-
-问：怎么导出自己朋友圈
-- 答：登陆另外一个账户搜自己，详见[电脑微信浏览朋友圈](/doc/manual_guide.md)
-- 目前没有其他方案，主要我不知道怎么在电脑端查看自己的朋友圈，如有解决方案欢迎PR
 
 问：为什么导出的数据不全？
-- 答：软件只能导出在电脑微信**浏览过**的朋友圈记录，未浏览过的无法导出。
 
-问：怎么在电脑微信浏览朋友圈？
-- 答：软件提供了两种自动浏览朋友圈的方法，第一种浏览全部，缺点是最多只能刷到前100天。第二种浏览单个朋友，没有时间限制。
+* 答：软件只能导出微信已经加载进本地的朋友圈。请先自己打开对应的朋友圈窗口，用「自动浏览当前朋友圈」往前滚，再点「下一步」。
 
-问：自动浏览单个朋友功能失效！
- - 答：可以手动操作，也可以替换图片提高成功率，详见文档[电脑微信浏览朋友圈](/doc/manual_guide.md)<br/>
-  
+问：怎么导出自己或某一个人的朋友圈？
+
+* 答：在微信里自己打开自己的朋友圈，或自己打开那个人的朋友圈，然后点「自动浏览当前朋友圈」。程序不会按昵称搜索。
+
+问：图片为什么能直接导出？
+
+* 答：导出时会按每条动态里的密钥下载并还原图片，不需要先在微信里逐张点开。
+
 问：为什么视频没法播放？
-- 答：请使用Chrome浏览器打开html文件。或者勾选视频转码，获得更多浏览器的兼容性。
+
+* 答：还原后的视频是 H.265，Chrome 通常可以播放。勾选「视频转码」会转成 H.264，导出更慢，更多浏览器可以播放。
 
 问：能不能导出聊天记录？
-- 答：导出聊天记录请使用这个软件[https://github.com/LC044/WeChatMsg](https://github.com/LC044/WeChatMsg)
 
+* 答：请使用 [WeChatMsg](https://github.com/LC044/WeChatMsg)。
 
-## 4. 更新计划
+## 4. 问题反馈
 
-*  导出点赞，评论等
-*  HTML网页功能增强，过滤排序等功能
-*  支持更多的朋友圈格式（音乐分享等）
-*  其他导出格式（Word, PDF等）
-*  佛系开发 随缘更新
+* 本 fork 的问题请提到 [wechat_moment_2026](https://github.com/Misaka12716/wechat_moment_2026) 的 Issues
+* 原项目的问题仍发给原作者：techshrimp@163.com
 
-## 5. 问题反馈
+## 5. 二次开发
 
-*  请直接提issue，或发送邮箱techshrimp@163.com
-*  请附上日志与软件截图，日志地址log\xxxx-xx-xx-output.log
-
-## 6. 二次开发
-
-*  Python环境: Python3.11
-*  安装依赖: pip install requirements.txt
-*  备注: pip install requirements.txt安装可能会不成功，使用命令：pip install -i https://pypi.doubanio.com/simple/ -r requirements.txt
-*  启动: python main.py
-*  编译为可执行文件: 使用Github Action(.github/workflows/main.yml)
-*  微信数据库解密见项目:[https://github.com/xaoyaoo/PyWxDump](https://github.com/xaoyaoo/PyWxDump)
+* Python 环境: Python 3.11
+* 安装依赖: `pip install -r requirements.txt`
+* 如果安装失败，可以换源：`pip install -i https://pypi.doubanio.com/simple/ -r requirements.txt`
+* 启动: `python main.py`
+* 编译为可执行文件: 使用 GitHub Action（`.github/workflows/main.yml`）
 
 # 三、免责声明
 
@@ -102,7 +86,6 @@ http://shmmsns.qpic.cn/mmsns/uGxMq1C4wvppcjBbyweK796GtT1hH3LGISYajZ2v7C11XhHk5ic
 * 本项目只能导出**自己有权查看**的朋友圈数据，无其他越权功能。
 * 用户理解并同意，任何违反法律法规、侵犯他人合法权益的行为，均与本项目及其开发者无关，后果由用户自行承担。
 * 禁止利用本项目的相关技术从事非法测试或渗透，禁止利用本项目的相关代码或相关技术从事任何非法工作
-
 
 ### 2. 操作规范
 
@@ -115,10 +98,6 @@ http://shmmsns.qpic.cn/mmsns/uGxMq1C4wvppcjBbyweK796GtT1hH3LGISYajZ2v7C11XhHk5ic
 
 # 四、致谢
 
-* PC微信工具:[https://github.com/xaoyaoo/PyWxDump](https://github.com/xaoyaoo/PyWxDump)
-* 留痕（聊天导出工具）:[https://github.com/LC044/WeChatMsg](https://github.com/LC044/WeChatMsg)
-
-# 五、捐赠
-
-如有帮助，请帮忙给B站视频点赞充电
-[技术爬爬虾](https://space.bilibili.com/316183842)
+* 原项目:[WechatMoments](https://github.com/tech-shrimp/WechatMoments)，作者 [技术爬爬虾](https://space.bilibili.com/316183842)
+* PC 微信工具:[PyWxDump](https://github.com/xaoyaoo/PyWxDump)
+* 留痕（聊天导出工具）:[WeChatMsg](https://github.com/LC044/WeChatMsg)

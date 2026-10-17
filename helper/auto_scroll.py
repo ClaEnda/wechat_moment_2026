@@ -1,10 +1,10 @@
 import random
-import time
 import threading
+import time
+
 import pywintypes
-import win32api
-import win32con
-import win32gui
+
+from helper.moments_window import find_moments_window, scroll_moments
 
 
 class AutoScroll(threading.Thread):
@@ -20,18 +20,11 @@ class AutoScroll(threading.Thread):
         while True:
             if self.scrolling:
                 try:
-                    rect = win32gui.GetWindowRect(self.moments_hwnd)
-                    x = (rect[0] + rect[2]) // 2
-                    y = (rect[1] + rect[3]) // 2
-                    notch = 10
-                    win32api.SendMessage(self.moments_hwnd, win32con.WM_MOUSEWHEEL,
-                                         win32api.MAKELONG(0, -120 * notch), win32api.MAKELONG(x, y))
-
+                    scroll_moments(self.moments_hwnd)
                     self.gui.flood_moments_note.pack()
-                    random_sleep = random.uniform(0.7, 0.8)
-                    time.sleep(random_sleep)
-                except pywintypes.error as e:
-                    self.moments_hwnd = win32gui.FindWindow("SnsWnd", '朋友圈')
+                    time.sleep(random.uniform(0.7, 0.8))
+                except pywintypes.error:
+                    self.moments_hwnd = find_moments_window()
                     self.gui.flood_moments_note.pack_forget()
                     time.sleep(1)
             else:

@@ -6,6 +6,8 @@ import pyautogui
 import pyperclip
 import win32con
 import win32gui
+
+from helper.moments_window import find_moments_window
 from retry import retry
 from win32api import GetSystemMetrics
 
@@ -179,7 +181,7 @@ class AutoScrollSingle(threading.Thread):
                 time.sleep(0.2)
 
                 search_hwnd = win32gui.FindWindow('Chrome_WidgetWin_0', '微信')
-                moments_hwnd = win32gui.FindWindow('SnsWnd', '朋友圈')
+                moments_hwnd = find_moments_window()
 
                 if search_hwnd and moments_hwnd:
                     # 调整位置朋友圈不要遮挡

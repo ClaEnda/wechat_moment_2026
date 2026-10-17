@@ -24,6 +24,7 @@ class Url:
     md5: str = field(metadata=config(field_name="@md5"), default="")
     token: str = field(metadata=config(field_name="@token"), default="")
     enc_idx: str = field(metadata=config(field_name="@enc_idx"), default="")
+    key: str = field(metadata=config(field_name="@key"), default="")
 
 @dataclass_json
 @dataclass
@@ -32,6 +33,22 @@ class Thumb:
     text: str = field(metadata=config(field_name="#text"))
     token: str = field(metadata=config(field_name="@token"), default="")
     enc_idx: str = field(metadata=config(field_name="@enc_idx"), default="")
+    key: str = field(metadata=config(field_name="@key"), default="")
+
+
+@dataclass_json
+@dataclass
+class Enc:
+    key: str = field(metadata=config(field_name="@key"), default="")
+
+
+def _decode_enc(value):
+    """视频的密钥在 enc 属性上。实况图里的 enc 有时只是一段文本。"""
+    if isinstance(value, dict):
+        return Enc(key=str(value.get("@key") or ""))
+    if isinstance(value, str):
+        return Enc(key=value)
+    return None
 
 
 @dataclass_json
@@ -45,6 +62,7 @@ class Media:
     videoDuration: Optional[str] = None
     title: Optional[str] = None
     description: Optional[str] = None
+    enc: Optional[Enc] = field(default=None, metadata=config(decoder=_decode_enc))
 
 @dataclass_json
 @dataclass

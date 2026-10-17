@@ -72,10 +72,16 @@ class ImageDecrypter:
         processed_files = 0
         for month in months:
             source_dir = self.sns_cache_path + "/" + month
+            if not os.path.isdir(source_dir):
+                continue
             total_files = total_files + len(list(Path(source_dir).rglob('*')))
+        if total_files == 0:
+            return
 
         for month in months:
             source_dir = self.sns_cache_path + "/" + month
+            if not os.path.isdir(source_dir):
+                continue
             for file in Path(source_dir).rglob('*'):
                 # 排除缩略图
                 if not exporter.stop_flag and file.is_file() and not file.name.endswith('_t'):

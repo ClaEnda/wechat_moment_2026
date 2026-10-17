@@ -35,6 +35,8 @@ class AutoScrollSingleGuide:
         self.button = tkinter.ttk.Button(self.frame, textvariable=self.button_text,
                                          command=self.switch_auto_scroll_single)
         self.button.pack(pady=5)
+        self.missing_note = tkinter.Label(self.frame, text="", fg="#c2410c", font=("微软雅黑", 10))
+        self.missing_note.pack()
 
     def on_search_username_click(self, event):
         if self.search_username.get() == '请输入好友昵称':
@@ -53,7 +55,7 @@ class AutoScrollSingleGuide:
                 self.search_username.config(fg='red')
                 return
             if search_hwnd != 0 and wechat_hwnd != 0:
-
+                self.missing_note.config(text="")
                 self.auto_thread = AutoScrollSingle(self, search_hwnd, search_username)
                 self.working_note = tkinter.Label(self.frame, text="正在自动读取朋友圈数据......."
                                                                    "\n请不要遮挡搜一搜窗口")
@@ -63,7 +65,7 @@ class AutoScrollSingleGuide:
                 self.auto_thread.start()
                 self.button_text.set("停止")
             else:
-                pass
+                self.missing_note.config(text="请先打开微信的搜一搜窗口")
         else:
             if self.auto_thread.scrolling:
                 self.button_text.set("开始")

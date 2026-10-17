@@ -1,10 +1,9 @@
 import tkinter
 import tkinter.ttk
 
-import win32gui
-
 from entity.contact import Contact
 from helper.auto_scroll import AutoScroll
+from helper.moments_window import find_moments_window
 
 
 class AutoScrollGuide:
@@ -14,7 +13,11 @@ class AutoScrollGuide:
         self.auto_thread = None
         self.frame = tkinter.LabelFrame(root)
 
-        self.open_moments_guide = tkinter.Label(self.frame, text="请打开朋友圈窗口")
+        self.open_moments_guide = tkinter.Label(
+            self.frame,
+            text="请自己打开朋友圈窗口\n所有人就打开自己的，某个人就打开那个人的",
+            font=("微软雅黑", 10),
+        )
         self.open_moments_guide.pack()
 
         image = tkinter.PhotoImage(file='resource/gui_pictures/open_moments_guide.png')
@@ -28,12 +31,15 @@ class AutoScrollGuide:
         self.auto_scroll_button = tkinter.ttk.Button(self.frame, textvariable=self.auto_scroll_button_text,
                                                      command=self.switch_auto_scroll)
         self.auto_scroll_button.pack(pady=5)
+        self.missing_note = tkinter.Label(self.frame, text="", fg="#c2410c", font=("微软雅黑", 10))
+        self.missing_note.pack()
 
     def switch_auto_scroll(self):
 
         if self.auto_thread is None:
-            moments_hwnd = win32gui.FindWindow("SnsWnd", '朋友圈')
+            moments_hwnd = find_moments_window()
             if moments_hwnd != 0:
+                self.missing_note.config(text="")
                 self.auto_thread = AutoScroll(self, moments_hwnd)
                 self.flood_moments_note = tkinter.Label(self.frame, text="正在自动读取朋友圈数据......."
                                                                          "\n可将窗口最小化，后台自动执行"
@@ -42,7 +48,7 @@ class AutoScrollGuide:
                 self.auto_thread.start()
                 self.auto_scroll_button_text.set("停止")
             else:
-                pass
+                self.missing_note.config(text="请先在微信里打开朋友圈窗口")
         else:
             if self.auto_thread.scrolling:
                 self.auto_scroll_button_text.set("继续")

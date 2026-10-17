@@ -85,6 +85,24 @@ class Sns:
             lock.release()
         return None
 
+    def get_earliest_timestamp(self):
+        """返回本地已缓存动态里最早的一条发布时间。没有记录时返回 None。"""
+        if not self.open_flag:
+            return None
+        sql = """
+            select min(CreateTime)
+            from FeedsV20
+            where CreateTime > 0
+        """
+        try:
+            lock.acquire(True)
+            self.cursor.execute(sql)
+            row = self.cursor.fetchone()
+            if row and row[0]:
+                return int(row[0])
+        finally:
+            lock.release()
+        return None
 
     def close(self):
         if self.open_flag:
