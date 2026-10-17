@@ -30,6 +30,15 @@ def get_img_div_css(size: int) -> str:
         return "width:19rem; overflow:hidden"
 
 
+def get_live_box_css(size: int) -> str:
+    if size == 1:
+        return "width:10rem;height:10rem;"
+    elif size == 2 or size == 4:
+        return "width:8rem;height:8rem;float:left;margin-bottom:0.2rem;margin-right:0.2rem;"
+    else:
+        return "width:5rem;height:5rem;float:left;margin-bottom:0.2rem;margin-right:0.2rem;"
+
+
 def get_img_css(size: int) -> str:
     """object-fit: cover; 预览图居中裁剪
     cursor:pointer; 手形鼠标
@@ -56,6 +65,59 @@ def is_music_msg(msg: MomentMsg) -> bool:
         if media.type == "5":
             return True
     return False
+
+
+def live_media_by_index(msg_dict: dict) -> list:
+    """按媒体下标取出实况短视频。没有实况的位置是 None。"""
+    from entity.moment_msg import Media
+
+    timeline = msg_dict.get("TimelineObject") or {}
+    content = timeline.get("ContentObject") or {}
+    media_list = content.get("mediaList") or {}
+    media = media_list.get("media") or []
+    if isinstance(media, dict):
+        media = [media]
+    known = {"type", "id", "url", "thumb", "thumbUrl", "videoDuration", "title", "description", "enc"}
+    result = []
+    for item in media:
+        live = None
+        block = item.get("LivePhoto") if isinstance(item, dict) else None
+        raw = block.get("liveMedia") if isinstance(block, dict) else None
+        if isinstance(raw, list):
+            raw = raw[0] if raw else None
+        if isinstance(raw, dict):
+            slim = {key: value for key, value in raw.items() if key in known}
+            try:
+                live = Media.from_json(json.dumps(slim))
+            except Exception:
+                live = None
+        result.append(live)
+    return result
+
+
+def render_images_html(images: list[Tuple]) -> str:
+    html = f'     <div style="{get_img_div_css(len(images))}">\n'
+    for thumb_path, image_path, live_path in images:
+        if live_path:
+            html += (
+                f'     <div class="live_box" style="{get_live_box_css(len(images))}"'
+                f' onmouseenter="playLive(event)" onmouseleave="stopLive(event)">\n'
+            )
+            html += (
+                f'       <img src="{thumb_path}" full_img="{image_path}"'
+                f' data-live="{live_path}" onclick="openFullSize(event)" />\n'
+            )
+            html += (
+                f'       <video class="live_video" playsinline loop preload="metadata"'
+                f' src="{live_path}"></video>\n'
+            )
+            html += "       <span class=\"live_badge\">实况</span>\n"
+            html += "     </div>\n"
+        else:
+            html += f"""     <img src="{thumb_path}" full_img="{image_path}" onclick="openFullSize(event)" 
+                                 style="{get_img_css(len(images))}"/>\n"""
+    html += "      </div>\n"
+    return html
 
 
 def get_music_info(msg: MomentMsg) -> Tuple[str, str, str]:
@@ -377,7 +439,7 @@ class HtmlExporter(threading.Thread):
             wxid = self.gui.account_info.get("wxid") or ""
         if not wxid or username != wxid:
             return
-        for _thumb_path, image_path in images:
+        for _thumb_path, image_path, _live_path in images:
             file_path = Path(f"output/{self.dir_name}") / image_path
             try:
                 self._owner_image_md5.add(hashlib.md5(file_path.read_bytes()).hexdigest())
@@ -455,8 +517,11 @@ class HtmlExporter(threading.Thread):
         contact = contacts_map.get(username)
         # 备注， 或用户名
         remark = contact.remark if contact.remark else contact.nickName
-        # 朋友圈图片
-        images = self.image_exporter.get_images(msg)
+        # 朋友圈图片。实况短视频按下标跟在对应封面上。
+        live_media = live_media_by_index(msg_dict)
+        images = self.image_exporter.get_images(
+            msg, live_media, self.video_exporter.save_live_video
+        )
         self._remember_owner_images(username, images)
         # 朋友圈视频
         videos = self.video_exporter.get_videos(msg)
@@ -473,14 +538,20 @@ class HtmlExporter(threading.Thread):
             publish_content = EmojiExporter.replace_emoji(publish_content)
         # 发布朋友的图片
         publish_images = ""
+        live_paths = []
         if len(images) != 0:
-            for thumb_path, image_path in images:
+            for _thumb_path, image_path, live_path in images:
                 publish_images += str(image_path) + ";"
+                if live_path:
+                    live_paths.append(str(live_path))
         # 发布朋友的视频
         publish_videos = ""
         if len(videos) != 0:
             for video_path in videos:
                 publish_videos = video_path
+        if live_paths:
+            joined = ";".join(live_paths)
+            publish_videos = f"{publish_videos};{joined}" if publish_videos else joined
         # 发布朋友圈的位置，可能为空
         publish_poiName = ""
         if msg.timelineObject.location and msg.timelineObject.location.poiName:
@@ -523,7 +594,7 @@ class HtmlExporter(threading.Thread):
             html += f'  <a href="{msg.timelineObject.ContentObject.contentUrl}" target="_blank">\n'
             html += '      <div class ="out_link" >\n'
             if images:
-                _thumb_path, image_path = images[0]
+                _thumb_path, image_path, _live_path = images[0]
                 html += f'        <img src="{image_path}"/>\n'
             html += f'       <div class ="text" >{msg.timelineObject.ContentObject.title}</div>\n'
             html += "      </div >\n"
@@ -536,7 +607,7 @@ class HtmlExporter(threading.Thread):
             html += '      <div class ="music_link" >\n'
             html += '        <div class ="music_des" >\n'
             if images:
-                thumb_path, image_path = images[0]
+                thumb_path, _image_path, _live_path = images[0]
                 html += f'        <img src = "{thumb_path}"/>\n'
             html += '             <div class = "music_title_musician">\n'
             html += f'               <div class = "music_title">{title}</div>\n'
@@ -567,11 +638,7 @@ class HtmlExporter(threading.Thread):
             html += "         </div>\n"
         # 普通朋友圈
         else:
-            html += f'     <div style="{get_img_div_css(len(images))}">\n'
-            for thumb_path, image_path in images:
-                html += f"""     <img src="{thumb_path}" full_img="{image_path}" onclick="openFullSize(event)" 
-                                 style="{get_img_css(len(images))}"/>\n"""
-            html += "      </div>\n"
+            html += render_images_html(images)
 
             html += "      <div>\n"
             for video_path in videos:

@@ -117,16 +117,18 @@ class ImageExporter:
             url = (media_item.thumb.text, "", "", "")
         return thumb, url
 
-    def get_images(self, msg: MomentMsg) -> list[Tuple]:
-        """ 获取一条朋友圈的全部图像， 返回值是一个元组列表
-            [(缩略图路径，原图路径)，(缩略图路径，原图路径)]
+    def get_images(self, msg: MomentMsg, live_media: Optional[list] = None, save_live=None) -> list[Tuple]:
+        """ 获取一条朋友圈的全部图像。
+
+        返回 [(缩略图路径, 原图路径, 实况视频路径或空字符串)]。
+        live_media 与原始 media 列表等长，某一项有实况短视频时才下载。
         """
         results = []
         if not msg.timelineObject.ContentObject.mediaList:
             return results
 
         media = msg.timelineObject.ContentObject.mediaList.media
-        for media_item in media:
+        for index, media_item in enumerate(media):
             thumb, url = self.get_image_thumb_and_url(
                 media_item, msg.timelineObject.ContentObject.contentStyle
             )
@@ -138,8 +140,15 @@ class ImageExporter:
             image_path = self._write_image(image_content, 'images')
             thumb_content = self.get_image(thumb) or image_content
             thumb_path = self._write_image(thumb_content, 'thumbs')
-            if thumb_path and image_path:
-                results.append((thumb_path, image_path))
+            if not thumb_path or not image_path:
+                continue
+            live_path = ""
+            live_item = live_media[index] if live_media and index < len(live_media) else None
+            if live_item and save_live:
+                saved = save_live(live_item)
+                if saved:
+                    live_path = saved if str(saved).startswith("videos/") else f"videos/{saved}"
+            results.append((thumb_path, image_path, live_path))
 
         return results
 

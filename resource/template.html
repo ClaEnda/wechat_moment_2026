@@ -9,14 +9,63 @@
   </head>
   <script>
     function openFullSize(event) {
-      document.getElementById("fullSizeImage").src = event.target.getAttribute("full_img");
+      var image = document.getElementById("fullSizeImage");
+      var video = document.getElementById("fullSizeVideo");
+      var live = event.target.getAttribute("data-live");
+      if (live) {
+        image.style.display = "none";
+        video.style.display = "inline";
+        video.muted = false;
+        video.src = live;
+        var playing = video.play();
+        if (playing) {
+          playing.catch(function () {});
+        }
+      } else {
+        video.pause();
+        video.removeAttribute("src");
+        video.style.display = "none";
+        image.style.display = "inline";
+        image.src = event.target.getAttribute("full_img");
+      }
       document.getElementById("fullSizeOverlay").style.display = "block";
     }
 
     function closeFullSize(event) {
-      if (event.target.id !== "fullSizeImage") {
-        document.getElementById("fullSizeOverlay").style.display = "none";
+      if (event.target.id === "fullSizeImage" || event.target.id === "fullSizeVideo") {
+        return;
       }
+      var video = document.getElementById("fullSizeVideo");
+      video.pause();
+      document.getElementById("fullSizeOverlay").style.display = "none";
+    }
+
+    function playLive(event) {
+      var video = event.currentTarget.querySelector("video");
+      if (!video) {
+        return;
+      }
+      video.style.opacity = "1";
+      video.muted = false;
+      var playing = video.play();
+      if (playing) {
+        playing.catch(function () {
+          video.muted = true;
+          video.play();
+        });
+      }
+    }
+
+    function stopLive(event) {
+      var video = event.currentTarget.querySelector("video");
+      if (!video) {
+        return;
+      }
+      video.pause();
+      try {
+        video.currentTime = 0;
+      } catch (error) {}
+      video.style.opacity = "0";
     }
 
     function openWarningOverlay(event) {
@@ -30,6 +79,7 @@
   <body>
     <div id="fullSizeOverlay" style="display: none" onclick="closeFullSize(event)">
       <img id="fullSizeImage" src="" alt="Full Size Image" />
+      <video id="fullSizeVideo" playsinline loop></video>
     </div>
 
     <div id="warningOverlay" style="display: none">

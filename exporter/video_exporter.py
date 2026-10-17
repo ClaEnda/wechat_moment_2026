@@ -147,6 +147,18 @@ class VideoExporter:
             return None
         return self.find_video_by_duration(rounded_duration)
 
+    def save_live_video(self, media_item: Media) -> Optional[str]:
+        """下载一条实况短视频，返回 videos 目录里的文件名。失败时返回 None。"""
+        if media_item is None or str(media_item.type) != "6":
+            return None
+        url = media_item.url
+        md5 = url.md5 if isinstance(url, Url) else ""
+        if md5:
+            cached = self.find_video_by_md5(md5)
+            if cached:
+                return cached
+        return self._download_video(media_item)
+
     def get_videos(self, msg: MomentMsg) -> list[str]:
         """ 获取一条朋友圈的全部视频， 返回值是一个文件路径列表
         """
