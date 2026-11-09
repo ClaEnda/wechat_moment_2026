@@ -3,8 +3,8 @@
 # by the workflow after PyInstaller finishes.
 
 a = Analysis(
-    ['main.py'],
-    pathex=[],
+    ['../main.py'],
+    pathex=['..'],
     binaries=[],
     datas=[],
     hiddenimports=['babel.numbers'],
