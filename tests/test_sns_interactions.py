@@ -33,6 +33,7 @@ class SnsInteractionTests(unittest.TestCase):
                 ("feed-1", "c2", 200, 2, "第二条评论", "wxid_b", "wxid_a", "c1"),
                 ("feed-1", "l1", 100, 1, "", "wxid_like", "", ""),
                 ("feed-2", "x1", 150, 2, "其他动态", "wxid_x", "", ""),
+                ("feed-1", "c3", 300, 2, "回复补充", "wxid_c", "", "c2"),
             ],
         )
 
@@ -46,6 +47,7 @@ class SnsInteractionTests(unittest.TestCase):
             rows = handler.get_interactions_by_feed_id("feed-1")
             self.assertEqual([row["CommentId"] for row in rows], ["l1", "c2"])
             self.assertEqual(rows[1]["ReplyUserName"], "wxid_a")
+            self.assertEqual(rows[2]["ReplyUserName"], "wxid_b")
         finally:
             handler.open_flag = False
             handler.DB = None
