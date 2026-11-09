@@ -74,6 +74,12 @@ class SnsInteractionTests(unittest.TestCase):
         self.assertIn("被回复好友", rendered)
         self.assertIn("回复内容", rendered)
 
+    def test_comment_type_takes_precedence_over_empty_content(self):
+        self.assertTrue(Comment("wxid_like", 1, "unexpected payload").is_like)
+        self.assertFalse(Comment("wxid_comment", 2, "").is_like)
+        self.assertTrue(Comment("wxid_legacy", None, "").is_like)
+        self.assertFalse(Comment("wxid_legacy", None, "comment body").is_like)
+
     def test_interaction_text_is_html_escaped(self):
         comment = Comment("wxid_author", 2, "<script>alert(1)</script>")
         rendered = render_interactions_html(
