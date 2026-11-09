@@ -40,5 +40,10 @@ class Comment:
 
     @property
     def is_like(self) -> bool:
-        # CommentV20 同表保存点赞与评论；点赞记录通常没有 Content 正文。
+        # 微信 CommentV20 的类型约定：1=点赞，2=评论。
+        # 只有旧版本没有类型字段时，才以正文是否为空作备用判断。
+        if self.comment_type == 1:
+            return True
+        if self.comment_type == 2:
+            return False
         return not self.content.strip()
