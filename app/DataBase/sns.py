@@ -121,7 +121,21 @@ class Sns:
                 self.cursor.execute(sql, [feed_id])
 
             rows = self.cursor.fetchall()
-            return [dict(zip(selected, row)) for row in rows]
+            records = [dict(zip(selected, row)) for row in rows]
+
+            # 某些微信版本只写入 ReplyId；此时用同一动态中的 CommentId 反查回复对象。
+            author_by_comment_id = {
+                str(record.get("CommentId")): str(record.get("FromUserName") or "")
+                for record in records
+                if record.get("CommentId") is not None
+            }
+            for record in records:
+                if not record.get("ReplyUserName") and record.get("ReplyId") is not None:
+                    record["ReplyUserName"] = author_by_comment_id.get(
+                        str(record.get("ReplyId")), ""
+                    )
+
+            return records
         except sqlite3.Error:
             # 数据库版本不兼容或没有互动表时，保留朋友圈正文导出，不中断整个任务。
             return []
