@@ -18,6 +18,7 @@ from exporter.avatar_exporter import AvatarExporter
 from exporter.emoji_exporter import EmojiExporter
 from exporter.image_exporter import ImageExporter
 from exporter.video_exporter import VideoExporter
+from exporter.sns_interactions import render_interactions_html
 from log import LOG
 from entity.moment_msg import MomentMsg
 from pathlib import Path
@@ -170,7 +171,43 @@ class HtmlExporter(threading.Thread):
         self.convert_video = convert_video
         self.stop_flag = False
         self._owner_image_md5: set[str] = set()
+        self._interaction_name_cache: dict[str, str] = {}
         super().__init__()
+
+    def _resolve_interaction_name(self, username: str) -> str:
+        """优先使用本地备注，其次使用微信昵称；不联网查询联系人信息。"""
+        username = str(username or "").strip()
+        if not username:
+            return "未知用户"
+
+        account_info = getattr(self.gui, "account_info", None) or {}
+        if username == str(account_info.get("wxid") or ""):
+            return "我"
+
+        selected = self.contacts_map.get(username)
+        if selected:
+            name = str(selected.remark or "").strip() or str(selected.nickName or "").strip()
+            if name:
+                return name
+
+        if username in self._interaction_name_cache:
+            return self._interaction_name_cache[username]
+
+        display_name = username
+        try:
+            from app.DataBase import micro_msg_db
+
+            contact = micro_msg_db.get_contact_by_username(username)
+            if contact:
+                remark = str(contact[3] or "").strip() if len(contact) > 3 else ""
+                nickname = str(contact[4] or "").strip() if len(contact) > 4 else ""
+                display_name = remark or nickname or username
+        except Exception:
+            # 联系人表缺失或此账号未缓存时，保留 wxid 作为可追溯的回退值。
+            display_name = username
+
+        self._interaction_name_cache[username] = display_name
+        return display_name
 
     def _load_earlier_moments(self) -> None:
         """开始日期早于本地缓存时，滚动已打开的朋友圈并重新复制数据库。"""
@@ -363,6 +400,8 @@ class HtmlExporter(threading.Thread):
                 "images",
                 "videos",
                 "location",
+                "likes",
+                "comments",
             ]
         )
         self.output_folder = f"output/{self.dir_name}/excel/"
@@ -414,11 +453,10 @@ class HtmlExporter(threading.Thread):
         for index, message_data in enumerate(message_datas):
             if not self.stop_flag:
                 if message_data[0] in self.contacts_map:
-                    comments_datas = sns_db.get_comment_by_feed_id(message_data[2])
-                    comments: list[Comment] = []
-                    for c in comments_datas or []:
-                        contact = Comment(c[0], c[1], c[2])
-                        comments.append(contact)
+                    interactions_data = sns_db.get_interactions_by_feed_id(message_data[2])
+                    comments: list[Comment] = [
+                        Comment.from_db_row(row) for row in interactions_data or []
+                    ]
                     try:
                         self.export_msg(message_data[1], comments, self.contacts_map)
                     except Exception:
@@ -556,7 +594,24 @@ class HtmlExporter(threading.Thread):
         publish_poiName = ""
         if msg.timelineObject.location and msg.timelineObject.location.poiName:
             publish_poiName = msg.timelineObject.location.poiName
-        # 添加数据到excel表格中
+        # 将互动内容同时保存在 Excel 中，便于后续检索与整理。
+        like_names: list[str] = []
+        comment_texts: list[str] = []
+        for interaction in comments:
+            author_name = self._resolve_interaction_name(interaction.from_user_name)
+            if interaction.is_like:
+                if author_name not in like_names:
+                    like_names.append(author_name)
+            else:
+                comment_text = interaction.content.replace("\r\n", "\n").replace("\r", "\n")
+                reply_id = interaction.reply_user_name.strip()
+                if reply_id:
+                    reply_name = self._resolve_interaction_name(reply_id)
+                    comment_texts.append(f"{author_name} 回复 {reply_name}：{comment_text}")
+                else:
+                    comment_texts.append(f"{author_name}：{comment_text}")
+
+        # 添加数据到 Excel 表格中
         self.outws.append(
             [
                 publish_time,
@@ -567,6 +622,8 @@ class HtmlExporter(threading.Thread):
                 publish_images,
                 publish_videos,
                 publish_poiName,
+                "、".join(like_names),
+                "\n".join(comment_texts),
             ]
         )
         fileName = "朋友圈数据.xlsx"
@@ -652,6 +709,12 @@ class HtmlExporter(threading.Thread):
             html += f'        <p class="location">{msg.timelineObject.location.poiName}</p>\n'
         html += f'            <p class="time">{msg.timelineObject.create_time}</p>\n'
         html += "         </div>\n"
+        # 互动信息沿用原模板的朋友圈卡片和 .pls 样式，只在原条目下方增加一块内容。
+        html += render_interactions_html(
+            comments,
+            self._resolve_interaction_name,
+            EmojiExporter.replace_emoji,
+        )
         html += "    </div>\n"
         html += "</div>\n"
         self.file.write(html)
