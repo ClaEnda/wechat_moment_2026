@@ -45,7 +45,7 @@ class SnsInteractionTests(unittest.TestCase):
         handler.open_flag = True
         try:
             rows = handler.get_interactions_by_feed_id("feed-1")
-            self.assertEqual([row["CommentId"] for row in rows], ["l1", "c2"])
+            self.assertEqual([row["CommentId"] for row in rows], ["l1", "c2", "c3"])
             self.assertEqual(rows[1]["ReplyUserName"], "wxid_a")
             self.assertEqual(rows[2]["ReplyUserName"], "wxid_b")
         finally:
