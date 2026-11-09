@@ -208,3 +208,37 @@ padding-top:0.2rem;
     z-index: 9999;
     text-align: center;
 }
+
+/* 朋友圈点赞与评论：沿用原模板蓝灰色系与紧凑排版。 */
+.moment-interactions {
+    width: 95%;
+    margin-top: 0.45rem;
+    margin-bottom: 0.55rem;
+    padding: 0.3rem 0.45rem;
+    background: #F7F7F7;
+    overflow: hidden;
+}
+.moment-like-line {
+    font-size: 0.7rem;
+    line-height: 1.55;
+    color: #41454D;
+    overflow-wrap: anywhere;
+}
+.moment-like-line .interaction-label {
+    color: #80858c;
+    margin-right: 0.25rem;
+}
+.moment-like-line .like-name {
+    color: #5BAFFF;
+}
+.moment-comment-line {
+    font-size: 0.7rem;
+    line-height: 1.55;
+    color: #41454D;
+    overflow-wrap: anywhere;
+}
+.moment-comment-line .comment-author,
+.moment-comment-line .reply-author {
+    color: #2e4f7a;
+    font-weight: bold;
+}

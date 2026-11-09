@@ -71,6 +71,64 @@ class Sns:
             lock.release()
         return res
 
+    def get_interactions_by_feed_id(self, feed_id):
+        """
+        读取一条朋友圈的点赞与评论记录。
+
+        微信客户端不同版本的 CommentV20 字段可能略有差异，因此先读取表结构，
+        再只选择实际存在的字段。Content 为空的记录作为点赞，存在正文的记录作为评论。
+        """
+        if not self.open_flag:
+            return []
+
+        acquired = False
+        try:
+            lock.acquire(True)
+            acquired = True
+            self.cursor.execute("PRAGMA table_info('CommentV20')")
+            schema = self.cursor.fetchall()
+            columns = {str(row[1]).lower(): str(row[1]) for row in schema}
+
+            required = ("feedid", "fromusername", "content")
+            if any(name not in columns for name in required):
+                return []
+
+            field_names = (
+                "FeedId",
+                "CommentId",
+                "CreateTime",
+                "CommentType",
+                "Content",
+                "FromUserName",
+                "ReplyUserName",
+                "ReplyId",
+            )
+            selected = [columns[name.lower()] for name in field_names if name.lower() in columns]
+            select_sql = ", ".join('"' + name.replace('"', '""') + '"' for name in selected)
+            feed_column = '"' + columns["feedid"].replace('"', '""') + '"'
+            order_column = columns.get("createtime")
+            if order_column:
+                order_sql = ' ORDER BY "' + order_column.replace('"', '""') + '" ASC'
+            else:
+                order_sql = " ORDER BY rowid ASC"
+
+            sql = f"SELECT {select_sql} FROM CommentV20 WHERE {feed_column}=?{order_sql}"
+            try:
+                self.cursor.execute(sql, [feed_id])
+            except sqlite3.OperationalError:
+                # 少数非标准表结构没有 rowid，退回不排序读取。
+                sql = f"SELECT {select_sql} FROM CommentV20 WHERE {feed_column}=?"
+                self.cursor.execute(sql, [feed_id])
+
+            rows = self.cursor.fetchall()
+            return [dict(zip(selected, row)) for row in rows]
+        except sqlite3.Error:
+            # 数据库版本不兼容或没有互动表时，保留朋友圈正文导出，不中断整个任务。
+            return []
+        finally:
+            if acquired:
+                lock.release()
+
     def get_cover_url(self) -> Optional[str]:
         if not self.open_flag:
             return None
