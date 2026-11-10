@@ -105,10 +105,18 @@ class DatabaseDecrypter:
             return False
 
         for i, task in enumerate(tasks):
-            flag, result = decrypt(*task)
+            try:
+                flag, result = decrypt(*task)
+            except Exception:
+                LOG.error(traceback.format_exc())
+                self.gui.decrypt_note_text.set(f"解密数据库失败：{os.path.basename(task[1])}")
+                self.gui.next_step_button.config(state=tkinter.NORMAL)
+                return False
             if not flag:
-                LOG.error(result)
-                raise RuntimeError(f"解密数据库失败：{os.path.basename(task[1])}")
+                LOG.error(str(result))
+                self.gui.decrypt_note_text.set(f"解密数据库失败：{os.path.basename(task[1])}")
+                self.gui.next_step_button.config(state=tkinter.NORMAL)
+                return False
             progress = round((i + 1) / len(tasks) * 100)
             self.gui.update_decrypt_progressbar(progress)
 

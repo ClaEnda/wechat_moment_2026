@@ -715,7 +715,9 @@ def _quick_check(path: str) -> bool:
     return bool(row) and row[0] == "ok"
 
 
-def _write_compatible(sns_path: str, contact_path: str, output_dir: str, account_dir: str) -> str:
+def _write_compatible(
+    sns_path: str, contact_path: str, output_dir: str, account_dir: str
+) -> tuple[str, str]:
     sns = sqlite3.connect(sns_path)
     contact = sqlite3.connect(contact_path)
     try:
