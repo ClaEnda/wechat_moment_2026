@@ -28,7 +28,10 @@ class MicroMsg:
         self.open_flag = False
         self.init_database()
 
-    def init_database(self):
+    def init_database(self, path=None):
+        global db_path
+        if path:
+            db_path = path
         if not self.open_flag:
             if os.path.exists(db_path):
                 self.DB = sqlite3.connect(db_path, check_same_thread=False)
