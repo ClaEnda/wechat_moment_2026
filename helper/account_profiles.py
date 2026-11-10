@@ -6,6 +6,7 @@ import ctypes.wintypes
 import json
 import os
 import re
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -104,8 +105,7 @@ class AccountProfileStore:
 
     def __init__(self, path: str | None = None, protector: Any = WindowsDpapi):
         if path is None:
-            base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-            path = os.path.join(base, "WechatMoments", "accounts.json")
+            path = os.path.join(str(portable_root()), "app", "KeyVault", "accounts.json")
         self.path = Path(path)
         self.protector = protector
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -236,8 +236,14 @@ def profile_cache_dir(wxid: str, root: str | None = None) -> str:
     if not safe:
         raise AccountProfileError("wxid 无效，无法建立独立缓存目录")
     if root is None:
-        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-        root = os.path.join(base, "WechatMoments", "account_cache")
+        root = os.path.join(str(portable_root()), "app", "DataBase", "Accounts")
     path = os.path.abspath(os.path.join(root, safe))
     os.makedirs(path, exist_ok=True)
     return path
+
+
+def portable_root() -> Path:
+    """返回便携程序根目录；开发运行时返回项目根目录。"""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[1]
