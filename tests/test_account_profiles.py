@@ -110,6 +110,7 @@ class AccountProfileStoreTests(unittest.TestCase):
             )
 
     def test_legacy_profile_does_not_require_db_storage(self):
+        os.makedirs(os.path.join(self.data_dir, "Msg"), exist_ok=True)
         self.store.save_profile(
             {
                 "wxid": "wxid_legacy",
