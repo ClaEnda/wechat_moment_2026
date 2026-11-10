@@ -3,6 +3,7 @@ import re
 import subprocess
 import sys
 import tkinter
+import tkinter.messagebox
 import tkinter.font
 import tkinter.ttk
 from datetime import datetime, timedelta
