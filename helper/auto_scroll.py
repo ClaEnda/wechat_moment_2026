@@ -9,9 +9,10 @@ from helper.moments_window import find_moments_window, scroll_moments
 
 class AutoScroll(threading.Thread):
 
-    def __init__(self, gui, moments_hwnd):
+    def __init__(self, gui, moments_hwnd, target_pid=None):
         self.gui = gui
         self.moments_hwnd = moments_hwnd
+        self.target_pid = target_pid
         self.scrolling = False
         super().__init__()
 
@@ -24,8 +25,11 @@ class AutoScroll(threading.Thread):
                     self.gui.flood_moments_note.pack()
                     time.sleep(random.uniform(0.7, 0.8))
                 except pywintypes.error:
-                    self.moments_hwnd = find_moments_window()
+                    self.moments_hwnd = find_moments_window(self.target_pid)
                     self.gui.flood_moments_note.pack_forget()
+                    if not self.moments_hwnd:
+                        self.scrolling = False
+                        self.gui.missing_note.config(text="所选 PID 对应的朋友圈窗口不可用，请重新确认账号窗口")
                     time.sleep(1)
             else:
                 self.gui.flood_moments_note.pack_forget()

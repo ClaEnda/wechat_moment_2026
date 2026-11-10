@@ -1,5 +1,9 @@
 import os
+import re
+import subprocess
+import sys
 import tkinter
+import tkinter.messagebox
 import tkinter.font
 import tkinter.ttk
 from datetime import datetime, timedelta
@@ -116,10 +120,14 @@ class Gui:
     def wechat_logged_in(self, account_info):
 
         self.account_info = account_info
-        if account_info.get("weixin4"):
-            self.waiting_label.config(text="微信 4.1 已登录")
-        else:
-            self.waiting_label.config(text="微信已登录")
+        display = str(account_info.get("display_name") or account_info.get("wxid") or "所选账号")
+        wxid = str(account_info.get("wxid") or "")
+        version = "微信 4.x" if account_info.get("weixin4") else "微信 3.x"
+        self.waiting_label.config(text=f"已选择 {display}  ·  {wxid}  ·  {version}")
+        self.switch_account_button = tkinter.ttk.Button(
+            self.root, text="切换账号", command=self.switch_account
+        )
+        self.switch_account_button.place(relx=0.92, rely=0.11, anchor="e")
 
         self.auto_scroll_button_text = tkinter.StringVar()
         self.auto_scroll_button_text.set("自动浏览当前朋友圈")
@@ -147,9 +155,22 @@ class Gui:
 
 
 
+    def switch_account(self):
+        if self.html_exporter_thread and self.html_exporter_thread.is_alive():
+            tkinter.messagebox.showwarning("无法切换", "请先完成或停止当前账号的导出。")
+            return
+        try:
+            if getattr(sys, "frozen", False):
+                subprocess.Popen([sys.executable], close_fds=True)
+            else:
+                subprocess.Popen([sys.executable, os.path.abspath(sys.argv[0])], close_fds=True)
+            self.root.destroy()
+        except Exception as exc:
+            tkinter.messagebox.showerror("切换失败", str(exc))
+
     def open_auto_scroll_guide(self):
 
-        self.auto_scroll_guide = AutoScrollGuide(self.root)
+        self.auto_scroll_guide = AutoScrollGuide(self.root, self)
         self.auto_scroll_guide.frame.place(relx=0.5, rely=0.62, anchor='center')
 
     def next_step(self):
@@ -167,13 +188,8 @@ class Gui:
             if self.auto_scroll_guide and self.auto_scroll_guide.frame:
                 self.auto_scroll_guide.frame.place_forget()
 
-            if not (self.account_info and self.account_info.get("weixin4")):
-                self.restart_note1 = tkinter.Label(self.root, text="请关闭微信客户端", fg="red")
-                self.restart_note1.place(relx=0.5, rely=0.2, anchor='center')
-                self.restart_note2 = tkinter.Label(self.root, text="然后点击下一步")
-                self.restart_note2.place(relx=0.5, rely=0.3, anchor='center')
-                self.page_stage = 2
-                return
+            # 多账号档案使用用户指定的目录和密钥；不要求关闭其他常驻微信实例。
+            # 复制期间建议不要在所选账号中大量新增媒体，以降低数据库快照发生变化的概率。
             self.page_stage = 2
 
         if self.page_stage == 2:
@@ -197,7 +213,14 @@ class Gui:
             self.decrypt_progressbar['value'] = 0
             self.next_step_button.config(state=tkinter.DISABLED)
             if self.decrypter.decrypt():
-                self.page_stage = 3
+                try:
+                    from helper.multi_account_runtime import activate_account_database
+                    database_dir = (self.account_info or {}).get("databaseDir") or self.decrypter.output_dir
+                    activate_account_database(database_dir)
+                    self.page_stage = 3
+                except Exception as exc:
+                    self.decrypt_note_text.set(f"账号数据库切换失败：{exc}")
+                    self.next_step_button.config(state=tkinter.NORMAL)
             return
         if self.page_stage == 3:
             self.decrypt_note.place_forget()
@@ -206,9 +229,14 @@ class Gui:
             # 不再有下一步按钮
             self.next_step_button.place_forget()
             # 初始化视频导出器
-            self.video_decrypter = VideoDecrypter(self, self.account_info.get("filePath"))
+            media_cache_dir = (self.account_info or {}).get("mediaCacheDir")
+            self.video_decrypter = VideoDecrypter(
+                self, self.account_info.get("filePath"), cache_path=media_cache_dir
+            )
             # 初始化图片导出器
-            self.image_decrypter = ImageDecrypter(self, self.account_info.get("filePath"))
+            self.image_decrypter = ImageDecrypter(
+                self, self.account_info.get("filePath"), cache_path=media_cache_dir
+            )
             self.page_stage = 4
 
     def init_export_page(self):
@@ -339,7 +367,22 @@ class Gui:
             self.export_progressbar['value'] = 0
 
             current_time = datetime.now()
-            self.export_dir_name = current_time.strftime("%Y_%m_%d_%H%M%S")
+            display_name = str((self.account_info or {}).get("display_name") or "")
+            wxid = str((self.account_info or {}).get("wxid") or "")
+            try:
+                from app.DataBase import micro_msg_db
+                own_contact = micro_msg_db.get_contact_by_username(wxid) if wxid else None
+                if own_contact:
+                    actual_name = str(own_contact[4] or "").strip() if len(own_contact) > 4 else ""
+                    actual_remark = str(own_contact[3] or "").strip() if len(own_contact) > 3 else ""
+                    display_name = actual_name or actual_remark or display_name
+            except Exception:
+                pass
+            display_name = display_name or wxid or "微信账号"
+            safe_name = re.sub(r'[<>:"/\\\\|?*\\x00-\\x1f]', "_", display_name).strip(" ._")
+            safe_wxid = re.sub(r'[^A-Za-z0-9_.-]', "_", wxid)[:24]
+            suffix = f"_{safe_wxid}" if safe_wxid else ""
+            self.export_dir_name = current_time.strftime("%Y_%m_%d_%H%M%S") + f"_{safe_name or '微信账号'}" + suffix
             contact_map = {contact.userName: contact for contact in contacts}
 
             self.confirm_button_text.set("停止导出")

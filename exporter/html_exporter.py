@@ -442,6 +442,19 @@ class HtmlExporter(threading.Thread):
             datetime.datetime(end_date.year, end_date.month, end_date.day).timetuple()
         )
 
+        account_info = getattr(self.gui, "account_info", None) or {}
+        if account_info.get("profileCacheDir") and account_info.get("mediaCacheDir"):
+            try:
+                from helper.media_cache import snapshot_sns_media_cache
+                snapshot_sns_media_cache(
+                    account_info.get("filePath") or "",
+                    account_info.get("mediaCacheDir"),
+                    self.begin_date,
+                    self.end_date,
+                )
+            except Exception:
+                LOG.exception("复制所选账号的朋友圈媒体缓存失败，继续使用已存在的缓存")
+
         self.gui.image_decrypter.decrypt_images(
             self, self.begin_date, end_date, self.dir_name
         )

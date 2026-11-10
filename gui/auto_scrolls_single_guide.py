@@ -6,14 +6,22 @@ import win32con
 import win32gui
 
 from helper.auto_scroll_single import AutoScrollSingle
+from helper.moments_window import find_window_by_class_pid
 
 
 class AutoScrollSingleGuide:
 
-    def __init__(self, root):
+    def __init__(self, root, gui=None):
         self.working_note = None
         self.auto_thread = None
         self.frame = tkinter.LabelFrame(root)
+        self.gui = gui
+        self.target_pid = None
+        if gui and getattr(gui, 'account_info', None):
+            info = gui.account_info
+            self.target_pid = info.get('process_id')
+            if self.target_pid is None and info.get('process_ids'):
+                self.target_pid = info['process_ids'][0]
 
         self.guide = tkinter.Label(self.frame, text="请打开搜一搜窗口\n点击开始后不要操作键鼠")
         self.guide.pack()
@@ -45,8 +53,8 @@ class AutoScrollSingleGuide:
 
     def switch_auto_scroll_single(self):
 
-        search_hwnd = win32gui.FindWindow('Chrome_WidgetWin_0', '微信')
-        wechat_hwnd = win32gui.FindWindow('WeChatMainWndForPC', '微信')
+        search_hwnd = find_window_by_class_pid("Chrome_WidgetWin_0", "微信", self.target_pid)
+        wechat_hwnd = find_window_by_class_pid("WeChatMainWndForPC", "微信", self.target_pid)
 
         search_username = self.search_username.get()
 
@@ -56,7 +64,7 @@ class AutoScrollSingleGuide:
                 return
             if search_hwnd != 0 and wechat_hwnd != 0:
                 self.missing_note.config(text="")
-                self.auto_thread = AutoScrollSingle(self, search_hwnd, search_username)
+                self.auto_thread = AutoScrollSingle(self, search_hwnd, search_username, self.target_pid)
                 self.working_note = tkinter.Label(self.frame, text="正在自动读取朋友圈数据......."
                                                                    "\n请不要遮挡搜一搜窗口")
 
