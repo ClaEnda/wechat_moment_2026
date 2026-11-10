@@ -71,13 +71,35 @@ class DatabaseDecrypter:
         output_dir = self.output_dir
         os.makedirs(output_dir, exist_ok=True)
         tasks = []
+        source_snapshot_dir = os.path.join(
+            (getattr(self.gui, "account_info", None) or {}).get("profileCacheDir")
+            or os.path.dirname(output_dir),
+            "encrypted_source",
+        )
+        os.makedirs(source_snapshot_dir, exist_ok=True)
         if os.path.exists(self.db_path):
             for root, dirs, files in os.walk(self.db_path):
                 for file in files:
-                    if '.db' == file[-3:] and file in self.db_list:
+                    if file.endswith(".db") and file in self.db_list:
                         in_path = os.path.join(root, file)
+                        relative = os.path.relpath(in_path, self.db_path)
+                        snapshot_path = os.path.join(source_snapshot_dir, relative)
+                        os.makedirs(os.path.dirname(snapshot_path), exist_ok=True)
+                        try:
+                            shutil.copy2(in_path, snapshot_path)
+                            for suffix in ("-wal", "-shm"):
+                                sidecar = in_path + suffix
+                                if os.path.isfile(sidecar):
+                                    shutil.copy2(sidecar, snapshot_path + suffix)
+                        except OSError as exc:
+                            LOG.error(f"复制账号数据库快照失败：{in_path}: {exc}")
+                            continue
                         output_path = os.path.join(output_dir, file)
-                        tasks.append([self.key, in_path, output_path])
+                        if os.path.exists(output_path):
+                            os.remove(output_path)
+                        tasks.append([self.key, snapshot_path, output_path])
+        if not tasks:
+            raise RuntimeError("所选微信账号目录中没有可读取的数据库")
         for i, task in enumerate(tasks):
             flag, result = decrypt(*task)
             if not flag:
@@ -103,7 +125,9 @@ class DatabaseDecrypter:
             LOG.error("数据库不存在\n请检查微信版本是否为最新")
 
         # 解密完成 放开下一步按钮
-        self.gui.decrypt_note_text.set("复制成功，请点击下一步")
+        if self.gui.account_info is not None:
+            self.gui.account_info["databaseDir"] = output_dir
+        self.gui.decrypt_note_text.set("所选账号的数据已复制，请点击下一步")
         self.gui.next_step_button.config(state=tkinter.NORMAL)
         return True
 
