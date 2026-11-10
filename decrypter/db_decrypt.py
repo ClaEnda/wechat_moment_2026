@@ -61,45 +61,63 @@ class DatabaseDecrypter:
             target_conn.close()
 
     def decrypt(self) -> bool:
-        if self.gui.account_info and self.gui.account_info.get("weixin4"):
+        account_info = self.gui.account_info or {}
+        from account_profiles import AccountProfileStore
+
+        store = AccountProfileStore()
+        profile = {
+            "profile_id": account_info.get("profile_id"),
+            "account_dir": account_info.get("filePath") or account_info.get("account_dir") or "",
+        }
+        if not profile["profile_id"]:
+            profile["profile_id"] = store.profile_id_for_path(profile["account_dir"])
+        workspace = store.workspace_for(profile)
+        output_dir = account_info.get("databaseCopyPath") or str(workspace / "database")
+        os.makedirs(output_dir, exist_ok=True)
+        account_info["workspaceDir"] = str(workspace)
+        account_info["databaseCopyPath"] = output_dir
+
+        if account_info.get("weixin4"):
             return self._decrypt_weixin4()
 
-        output_dir = 'app/DataBase/Msg'
-        os.makedirs(output_dir, exist_ok=True)
         tasks = []
         if os.path.exists(self.db_path):
             for root, dirs, files in os.walk(self.db_path):
                 for file in files:
-                    if '.db' == file[-3:] and file in self.db_list:
+                    if file.endswith(".db") and file in self.db_list:
                         in_path = os.path.join(root, file)
                         output_path = os.path.join(output_dir, file)
                         tasks.append([self.key, in_path, output_path])
+        if not tasks:
+            self.gui.decrypt_note_text.set("所选账号目录中没有可解密的数据库")
+            self.gui.next_step_button.config(state=tkinter.NORMAL)
+            return False
+
         for i, task in enumerate(tasks):
             flag, result = decrypt(*task)
             if not flag:
                 LOG.error(result)
-            progress = round((i+1) / len(tasks) * 100)
+                raise RuntimeError(f"解密数据库失败：{os.path.basename(task[1])}")
+            progress = round((i + 1) / len(tasks) * 100)
             self.gui.update_decrypt_progressbar(progress)
 
-        target_database = "app/DataBase/Msg/MSG.db"
-        # 源数据库文件列表
-        source_databases = [f"app/DataBase/Msg/MSG{i}.db" for i in range(0, 50)]
-        import shutil
+        target_database = os.path.join(output_dir, "MSG.db")
+        source_databases = [os.path.join(output_dir, f"MSG{i}.db") for i in range(0, 50)]
         if os.path.exists(target_database):
             os.remove(target_database)
         try:
-            shutil.copy2("app/DataBase/Msg/MSG0.db", target_database)  # 使用一个数据库文件作为模板
-        except FileNotFoundError:
-            LOG.error(traceback.format_exc())
-        # 合并数据库
-        try:
+            import shutil
+            shutil.copy2(os.path.join(output_dir, "MSG0.db"), target_database)
             self.merge_databases(source_databases, target_database)
-        except FileNotFoundError:
+        except FileNotFoundError as exc:
             LOG.error(traceback.format_exc())
-            LOG.error("数据库不存在\n请检查微信版本是否为最新")
+            self.gui.decrypt_note_text.set("所选账号缺少聊天数据库，请检查账号目录和密钥")
+            self.gui.next_step_button.config(state=tkinter.NORMAL)
+            return False
 
-        # 解密完成 放开下一步按钮
-        self.gui.decrypt_note_text.set("复制成功，请点击下一步")
+        from app.DataBase import use_database_dir
+        use_database_dir(output_dir)
+        self.gui.decrypt_note_text.set("所选账号数据库复制成功，请点击下一步")
         self.gui.next_step_button.config(state=tkinter.NORMAL)
         return True
 
@@ -113,6 +131,8 @@ class DatabaseDecrypter:
 
         try:
             build_export_databases(self.gui.account_info, progress)
+            from app.DataBase import use_database_dir
+            use_database_dir(self.gui.account_info["databaseCopyPath"])
         except Weixin4Error as exc:
             LOG.error(str(exc))
             self.gui.decrypt_note_text.set(str(exc))
