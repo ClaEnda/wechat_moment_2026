@@ -71,6 +71,7 @@ class DatabaseDecrypter:
         }
         if not profile["profile_id"]:
             profile["profile_id"] = store.profile_id_for_path(profile["account_dir"])
+        profile_id = profile["profile_id"]
         workspace = store.workspace_for(profile)
         output_dir = account_info.get("databaseCopyPath") or str(workspace / "database")
         os.makedirs(output_dir, exist_ok=True)

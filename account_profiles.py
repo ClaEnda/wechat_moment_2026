@@ -27,6 +27,19 @@ def _dpapi(data: bytes, protect: bool) -> bytes:
         raise RuntimeError("密钥保护需要 Windows DPAPI")
     crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    blob_ptr = ctypes.POINTER(_DATA_BLOB)
+    crypt32.CryptProtectData.argtypes = [
+        blob_ptr, ctypes.c_wchar_p, blob_ptr, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.wintypes.DWORD, blob_ptr,
+    ]
+    crypt32.CryptProtectData.restype = ctypes.wintypes.BOOL
+    crypt32.CryptUnprotectData.argtypes = [
+        blob_ptr, ctypes.POINTER(ctypes.c_wchar_p), blob_ptr, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.wintypes.DWORD, blob_ptr,
+    ]
+    crypt32.CryptUnprotectData.restype = ctypes.wintypes.BOOL
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel32.LocalFree.restype = ctypes.c_void_p
     source, source_buffer = _blob(data)
     target = _DATA_BLOB()
     if protect:

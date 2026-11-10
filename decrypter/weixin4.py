@@ -98,6 +98,7 @@ def probe_client() -> dict:
         return {
             "state": "weixin4-error",
             "message": "已发现微信 4.1，但没有找到本地数据库目录",
+            "process_ids": pids,
         }
 
     from account_profiles import AccountProfileStore

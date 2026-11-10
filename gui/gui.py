@@ -127,6 +127,7 @@ class Gui:
     def wechat_logged_in(self, account_info):
         """兼容单账号入口；微信 4.x 多实例会进入账号选择器。"""
         if isinstance(account_info, dict) and isinstance(account_info.get("accounts"), list):
+            self.account_info = dict(account_info)
             self.available_process_ids = account_info.get("process_ids") or []
             discovered = account_info.get("accounts") or []
             saved = self.account_profile_store.load_profiles()
