@@ -5,6 +5,7 @@ on:
     branches:
       - "build/windows-portable-2026"
       - "feature/sns-likes-comments"
+      - "feature/multi-account-profiles"
   workflow_dispatch:
 
 permissions:
