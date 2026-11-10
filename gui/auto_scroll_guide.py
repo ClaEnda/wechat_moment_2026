@@ -8,10 +8,17 @@ from helper.moments_window import find_moments_window
 
 class AutoScrollGuide:
 
-    def __init__(self, root):
+    def __init__(self, root, gui=None):
         self.flood_moments_note = None
         self.auto_thread = None
         self.frame = tkinter.LabelFrame(root)
+        self.gui = gui
+        self.target_pid = None
+        if gui and getattr(gui, "account_info", None):
+            info = gui.account_info
+            self.target_pid = info.get("process_id")
+            if self.target_pid is None and info.get("process_ids"):
+                self.target_pid = info["process_ids"][0]
 
         self.open_moments_guide = tkinter.Label(
             self.frame,
@@ -37,10 +44,10 @@ class AutoScrollGuide:
     def switch_auto_scroll(self):
 
         if self.auto_thread is None:
-            moments_hwnd = find_moments_window()
+            moments_hwnd = find_moments_window(self.target_pid)
             if moments_hwnd != 0:
                 self.missing_note.config(text="")
-                self.auto_thread = AutoScroll(self, moments_hwnd)
+                self.auto_thread = AutoScroll(self, moments_hwnd, self.target_pid)
                 self.flood_moments_note = tkinter.Label(self.frame, text="正在自动读取朋友圈数据......."
                                                                          "\n可将窗口最小化，后台自动执行"
                                                                          "\n可随时查看进度，可随时停止")
@@ -48,7 +55,10 @@ class AutoScrollGuide:
                 self.auto_thread.start()
                 self.auto_scroll_button_text.set("停止")
             else:
-                self.missing_note.config(text="请先在微信里打开朋友圈窗口")
+                if self.target_pid is None:
+                    self.missing_note.config(text="没有绑定该账号的微信 PID，且检测到窗口不唯一。请在账号档案中填写对应 PID。")
+                else:
+                    self.missing_note.config(text="未找到该 PID 对应的朋友圈窗口，请在所选微信实例中打开朋友圈。")
         else:
             if self.auto_thread.scrolling:
                 self.auto_scroll_button_text.set("继续")

@@ -170,7 +170,7 @@ class Gui:
 
     def open_auto_scroll_guide(self):
 
-        self.auto_scroll_guide = AutoScrollGuide(self.root)
+        self.auto_scroll_guide = AutoScrollGuide(self.root, self)
         self.auto_scroll_guide.frame.place(relx=0.5, rely=0.62, anchor='center')
 
     def next_step(self):

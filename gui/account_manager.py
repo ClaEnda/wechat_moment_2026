@@ -142,7 +142,7 @@ def choose_account_profile(parent=None):
         version_box.grid(row=2, column=1, sticky="w", pady=5)
         row("账号数据目录", variables["account_dir"], 3, browse=True)
         row("db_storage（4.x）", variables["db_storage"], 4, browse=True)
-        row("对应的运行进程 PID（逗号分隔）", variables["process_ids"], 5)
+        row("对应此账号的微信主进程 PID（单个）", variables["process_ids"], 5)
 
         ttk.Separator(frame).grid(row=6, column=0, columnspan=3, sticky="ew", pady=10)
         ttk.Label(
@@ -259,6 +259,7 @@ def choose_account_profile(parent=None):
                 "manual_keys": secrets,
                 "key": secrets.get("legacy_db_key", ""),
                 "process_ids": profile.get("process_ids", []),
+                "process_id": (profile.get("process_ids") or [None])[0],
             }
         except (AccountProfileError, OSError) as exc:
             messagebox.showerror("账号无法使用", str(exc), parent=root)
