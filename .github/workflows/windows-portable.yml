@@ -1,20 +1,18 @@
-name: Windows portable build
+name: Windows portable build and GitHub Release
 
 on:
   push:
     branches:
-      - "build/windows-portable-2026"
-      - "feature/sns-likes-comments"
-      - "feature/multi-account-profiles"
+      - "windows-portable-build"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-windows-x64:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -38,59 +36,103 @@ jobs:
         run: |
           python -m unittest discover -s tests -v
 
-      - name: Build executable
+      - name: Build Windows executable
         shell: pwsh
         run: |
           python -m PyInstaller --noconfirm --clean --distpath dist --workpath build packaging/main_portable.spec
           $app = Join-Path $env:GITHUB_WORKSPACE "dist\wechat_moments"
-          if (!(Test-Path (Join-Path $app "wechat_moments.exe"))) {
+          $exe = Join-Path $app "wechat_moments.exe"
+          if (!(Test-Path $exe)) {
             throw "PyInstaller did not produce wechat_moments.exe"
           }
+          $runtime = Join-Path $app "Dependencies"
+          if (!(Test-Path $runtime)) {
+            throw "PyInstaller runtime directory Dependencies is missing"
+          }
 
-      - name: Assemble portable environment and resources
+      - name: Assemble clean portable directory
         shell: pwsh
         run: |
           $app = Join-Path $env:GITHUB_WORKSPACE "dist\wechat_moments"
-          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "resource") -Destination (Join-Path $app "resource") -Recurse -Force
+          $resourceSource = Join-Path $env:GITHUB_WORKSPACE "resource"
+          if (!(Test-Path $resourceSource)) { throw "resource directory is missing" }
+          Copy-Item -LiteralPath $resourceSource -Destination (Join-Path $app "resource") -Recurse -Force
           Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "README.md") -Destination $app -Force
           Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "LICENSE") -Destination $app -Force
+
+          $directories = @(
+            "app\DataBase\Accounts",
+            "app\KeyVault",
+            "output",
+            "log",
+            "Documentation"
+          )
+          foreach ($relative in $directories) {
+            New-Item -ItemType Directory -Path (Join-Path $app $relative) -Force | Out-Null
+          }
+
           @'
           微信朋友圈导出工具 - Windows 便携版
 
-          使用前提：
-          1. Windows 10/11 64 位系统。
-          2. 安装并登录电脑版微信 4.1。
-          3. 仅备份本人有权访问的朋友圈内容，并遵守项目许可证及隐私法律规定。
+          目录说明：
+          - wechat_moments.exe：程序入口。
+          - Dependencies：Python 运行库、DLL、PYD 及其他 PyInstaller 依赖。
+          - resource：界面资源、HTML 模板、CSS/JS 及 FFmpeg 工具。
+          - app\DataBase\Accounts\<wxid>：按微信账号隔离的数据库快照和本地账号缓存。
+          - app\KeyVault：本机账号档案；数据库密钥由 Windows DPAPI 保护。
+          - output：每次导出按微信显示名称和 wxid 分目录保存。
+          - log：运行日志。
+          - Documentation：说明文件。
 
           使用方法：
-          双击 wechat_moments.exe 启动。请保持微信处于登录状态。
-          程序导出的 HTML 和媒体文件保存在程序目录下的 output 文件夹。
+          1. 解压整个目录，不要单独移动 exe 或 Dependencies。
+          2. 在 Windows 10/11 64 位环境安装并登录电脑版微信。
+          3. 双击 wechat_moments.exe，按窗口提示选择并配置账号。
+          4. 保留整个目录；导出的 HTML 与媒体文件位于 output。
 
-          说明：
-          本程序采用目录式便携打包。wechat_moments.exe 不能单独从文件夹中抽出运行；
-          resource 文件夹及同目录的运行库文件必须与 exe 一起保留。
+          注意：
+          账号密钥档案通过 Windows DPAPI 保护，通常只能由创建档案的同一 Windows 用户解密。
+          本构建不会包含任何个人微信数据库、登录令牌或账号密钥。
           '@ | Set-Content -LiteralPath (Join-Path $app "运行说明.txt") -Encoding UTF8
 
           $mustHave = @(
+            (Join-Path $app "wechat_moments.exe"),
+            (Join-Path $app "Dependencies"),
             (Join-Path $app "resource\ffmpeg.exe"),
             (Join-Path $app "resource\ffprobe.exe"),
-            (Join-Path $app "resource\template.html")
+            (Join-Path $app "resource\template.html"),
+            (Join-Path $app "app\DataBase\Accounts"),
+            (Join-Path $app "app\KeyVault"),
+            (Join-Path $app "output")
           )
-          foreach ($file in $mustHave) {
-            if (!(Test-Path $file)) { throw "Missing required resource: $file" }
+          foreach ($path in $mustHave) {
+            if (!(Test-Path $path)) { throw "Required portable component is missing: $path" }
           }
 
-          $zip = Join-Path $env:GITHUB_WORKSPACE "dist\WechatMoments-Windows-x64.zip"
+          $zip = Join-Path $env:GITHUB_WORKSPACE "dist\WechatMoments-Windows-Portable.zip"
           if (Test-Path $zip) { Remove-Item $zip -Force }
           Compress-Archive -Path (Join-Path $app "*") -DestinationPath $zip -CompressionLevel Optimal
-          Get-FileHash $zip -Algorithm SHA256 | Format-List | Out-File (Join-Path $env:GITHUB_WORKSPACE "dist\SHA256.txt")
+          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  WechatMoments-Windows-Portable.zip" | Set-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "dist\WechatMoments-Windows-Portable.zip.sha256") -Encoding ascii
 
-      - name: Upload portable package
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WechatMoments-Windows-x64
+          name: WechatMoments-Windows-Portable
           path: |
-            dist/WechatMoments-Windows-x64.zip
-            dist/SHA256.txt
+            dist/WechatMoments-Windows-Portable.zip
+            dist/WechatMoments-Windows-Portable.zip.sha256
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "windows-portable-${{ github.run_number }}"
+          gh release create $tag `
+            "dist/WechatMoments-Windows-Portable.zip" `
+            "dist/WechatMoments-Windows-Portable.zip.sha256" `
+            --title "WechatMoments Windows Portable #${{ github.run_number }}" `
+            --notes "Automated Windows x64 portable build. Source branch: ${{ github.ref_name }}. Commit: ${{ github.sha }}. Includes the executable, grouped runtime dependencies, app/DataBase account-cache layout, output directory, and SHA256 checksum."
