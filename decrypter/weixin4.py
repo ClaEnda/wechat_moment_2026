@@ -17,6 +17,7 @@ import struct
 import subprocess
 import tempfile
 import winreg
+from helper.db_snapshot import copy_sqlite_snapshot
 from xml.etree import ElementTree
 
 PAGE_SZ = 4096
@@ -225,15 +226,10 @@ def build_export_databases_with_manual_keys(
 
         progress(10 + index * 30, f"正在复制所选账号的 {name} 数据库....")
         snapshot = os.path.join(source_cache, name + ".db")
-        _copy_shared(src, snapshot)
-
-        wal_source = src + "-wal"
-        wal_snapshot = snapshot + "-wal"
-        if os.path.isfile(wal_source):
-            _copy_shared(wal_source, wal_snapshot)
-        shm_source = src + "-shm"
-        if os.path.isfile(shm_source):
-            _copy_shared(shm_source, snapshot + "-shm")
+        try:
+            copy_sqlite_snapshot(src, snapshot, retries=3)
+        except Exception as exc:
+            raise Weixin4Error(f"{name} 数据库正在变化，无法取得稳定快照：{exc}") from exc
 
         plain_path = os.path.join(plain_cache, name + "-plain.db")
         if os.path.exists(plain_path):

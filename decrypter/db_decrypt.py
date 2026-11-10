@@ -4,6 +4,7 @@ import tkinter
 import traceback
 
 from pywxdump import decrypt
+from helper.db_snapshot import copy_sqlite_snapshot
 from log import LOG
 
 
@@ -95,12 +96,8 @@ class DatabaseDecrypter:
                         snapshot_path = os.path.join(source_snapshot_dir, relative)
                         os.makedirs(os.path.dirname(snapshot_path), exist_ok=True)
                         try:
-                            shutil.copy2(in_path, snapshot_path)
-                            for suffix in ("-wal", "-shm"):
-                                sidecar = in_path + suffix
-                                if os.path.isfile(sidecar):
-                                    shutil.copy2(sidecar, snapshot_path + suffix)
-                        except OSError as exc:
+                            copy_sqlite_snapshot(in_path, snapshot_path, retries=3)
+                        except Exception as exc:
                             LOG.error(f"复制账号数据库快照失败：{in_path}: {exc}")
                             continue
                         output_path = os.path.join(output_dir, file)
