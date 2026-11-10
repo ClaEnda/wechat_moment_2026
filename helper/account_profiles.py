@@ -154,6 +154,8 @@ class AccountProfileStore:
                 raise AccountProfileError("微信 4.x 的 db_storage 目录不存在")
         else:
             db_storage = ""
+            if not os.path.isdir(os.path.join(account_dir, "Msg")):
+                raise AccountProfileError("微信 3.x 账号目录中没有 Msg 子目录，请重新选择 WeChat Files/wxid_* 目录")
         display_name = str(profile.get("display_name") or "").strip()[:80]
         process_ids = []
         for item in profile.get("process_ids") or []:

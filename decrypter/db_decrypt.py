@@ -123,7 +123,8 @@ class DatabaseDecrypter:
 
         target_database = os.path.join(output_dir, "MSG.db")
         # 源数据库文件列表
-        source_databases = [os.path.join(output_dir, f"MSG{i}.db") for i in range(0, 50)]
+        # MSG0 已被复制为目标库模板，不应再次插入，否则该分片会重复。
+        source_databases = [os.path.join(output_dir, f"MSG{i}.db") for i in range(1, 50)]
         if os.path.exists(target_database):
             os.remove(target_database)
         try:

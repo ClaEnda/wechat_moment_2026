@@ -243,14 +243,15 @@ def build_export_databases_with_manual_keys(
         decrypted[name] = plain_path
         progress(35 + index * 25, f"{name} 数据库已校验")
 
-    wxid = _write_compatible(
+    inferred_wxid = _write_compatible(
         decrypted["sns"],
         decrypted["contact"],
         plain_cache,
         account_dir,
     )
-    if wxid:
-        account_info["wxid"] = wxid
+    # 档案中经用户确认的 wxid 是账号缓存隔离的主键，不用目录名推断值覆盖。
+    if not account_info.get("wxid") and inferred_wxid:
+        account_info["wxid"] = inferred_wxid
     account_info["dbStorage"] = storage
     account_info["databaseDir"] = plain_cache
     progress(100, "该账号的数据已复制并整理到独立缓存")
