@@ -78,4 +78,37 @@ def discover_account_directories() -> list[AccountDirectoryCandidate]:
             folder_name=folder_name,
             wxid_guess=wxid_guess,
         ))
-    return result
+
+    # 微信 3.x 常见用户文件目录：Documents/WeChat Files/wxid_xxx。
+    home = os.path.expanduser("~")
+    legacy_roots = [
+        os.path.join(home, "Documents", "WeChat Files"),
+        os.path.join(home, "Documents", "微信文件"),
+        os.path.join(home, "WeChat Files"),
+    ]
+    for root in legacy_roots:
+        if not os.path.isdir(root):
+            continue
+        try:
+            children = list(os.scandir(root))
+        except OSError:
+            continue
+        for child in children:
+            if not child.is_dir():
+                continue
+            account_dir = os.path.abspath(child.path)
+            if account_dir in seen:
+                continue
+            if not os.path.isdir(os.path.join(account_dir, "Msg")):
+                continue
+            seen.add(account_dir)
+            folder_name = child.name
+            wxid_guess = folder_name if folder_name.lower().startswith("wxid_") else ""
+            result.append(AccountDirectoryCandidate(
+                account_dir=account_dir,
+                db_storage="",
+                folder_name=folder_name,
+                wxid_guess=wxid_guess,
+            ))
+
+    return sorted(result, key=lambda item: (item.wxid_guess or item.folder_name).casefold())
