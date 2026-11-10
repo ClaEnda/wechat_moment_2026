@@ -781,7 +781,7 @@ def _read_moments(conn: sqlite3.Connection) -> tuple[list[tuple], list[tuple]]:
     return feeds, comments
 
 
-def _read_contacts(conn: sqlite3.Connection, account_dir: str) -> tuple[list[tuple], str]:
+def _read_contacts(conn: sqlite3.Connection, account_dir: str) -> tuple[list[tuple], str, str]:
     tables = _table_names(conn)
     table = "contact" if "contact" in tables else ("Contact" if "Contact" in tables else "")
     if not table:

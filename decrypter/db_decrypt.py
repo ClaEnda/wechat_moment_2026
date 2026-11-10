@@ -81,13 +81,23 @@ class DatabaseDecrypter:
             return self._decrypt_weixin4()
 
         tasks = []
+        key = self.key
+        if not key:
+            secrets = store.load_secrets(profile_id)
+            key = secrets.get("legacy_db_key", "")
+            secrets.clear()
+        if not key:
+            self.gui.decrypt_note_text.set("请在账号设置中输入该账号数据库密钥")
+            self.gui.next_step_button.config(state=tkinter.NORMAL)
+            return False
+
         if os.path.exists(self.db_path):
             for root, dirs, files in os.walk(self.db_path):
                 for file in files:
                     if file.endswith(".db") and file in self.db_list:
                         in_path = os.path.join(root, file)
                         output_path = os.path.join(output_dir, file)
-                        tasks.append([self.key, in_path, output_path])
+                        tasks.append([key, in_path, output_path])
         if not tasks:
             self.gui.decrypt_note_text.set("所选账号目录中没有可解密的数据库")
             self.gui.next_step_button.config(state=tkinter.NORMAL)

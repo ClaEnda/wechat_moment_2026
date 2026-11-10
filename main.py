@@ -18,11 +18,14 @@ def main():
 
     probe = probe_client()
     if probe.get("state") == "weixin4":
-        gui.waiting_label.config(text="微信 4.1 已登录")
-        gui.wechat_logged_in(probe["account"])
+        gui.wechat_logged_in(probe)
         return
     if probe.get("state") == "weixin4-error":
-        gui.waiting_label.config(text=probe.get("message") or "微信 4.1 暂不可用")
+        gui.wechat_logged_in({
+            "accounts": [],
+            "process_ids": probe.get("process_ids") or [],
+            "message": probe.get("message") or "已发现微信，但未自动找到数据目录",
+        })
         return
 
     from pywxdump import read_info
@@ -40,13 +43,23 @@ def main():
         if isinstance(info, str) or not info:
             gui.waiting_label.config(text="请启动微信....")
             sleep(0.5)
-        elif isinstance(info, list) and info[0].get("key") == "None":
+        elif isinstance(info, list) and not any(item.get("key") not in (None, "", "None") for item in info if isinstance(item, dict)):
             gui.waiting_label.config(text="请登陆微信....")
             sleep(0.5)
         else:
             break
 
-    gui.wechat_logged_in(info[0])
+    legacy_accounts = []
+    for item in info:
+        if not isinstance(item, dict) or item.get("key") in (None, "", "None"):
+            continue
+        account = dict(item)
+        account["weixin4"] = False
+        account.setdefault("account_dir", account.get("filePath") or account.get("db_path") or "")
+        account.setdefault("wxid", account.get("wxid") or "")
+        account.setdefault("displayName", account.get("nickname") or account.get("wxid") or "")
+        legacy_accounts.append(account)
+    gui.wechat_logged_in({"accounts": legacy_accounts, "process_ids": []})
 
 
 if __name__ == "__main__":

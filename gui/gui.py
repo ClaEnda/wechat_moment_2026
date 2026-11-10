@@ -144,7 +144,7 @@ class Gui:
                 profile["wxid"] = profile.get("wxid") or previous.get("wxid") or ""
                 profile["display_name"] = profile.get("displayName") or previous.get("display_name") or profile.get("wxid") or os.path.basename(path)
                 profile["displayName"] = profile["display_name"]
-                profile["weixin4"] = True
+                profile["weixin4"] = bool(profile.get("weixin4", True))
                 if path not in seen:
                     merged.append(profile)
                     seen.add(path)
@@ -157,7 +157,7 @@ class Gui:
                         "filePath": previous.get("account_dir"),
                         "dbStorage": previous.get("db_storage"),
                         "displayName": previous.get("display_name") or previous.get("wxid") or os.path.basename(path),
-                        "weixin4": True,
+                        "weixin4": bool(previous.get("weixin4", True)),
                         "availableProcessIds": self.available_process_ids,
                         "process_ids": previous.get("process_ids") or self.available_process_ids,
                     })
@@ -177,8 +177,9 @@ class Gui:
         self.account_picker_frame = tkinter.Frame(self.root, bg="#f7f8fa")
         self.account_picker_frame.place(relx=0.5, rely=0.43, anchor="center")
         count = len(self.account_profiles)
+        status = (self.account_info or {}).get("message") or ""
         self.waiting_label.config(
-            text=f"检测到 {count} 个微信数据目录，运行中的微信进程：{len(self.available_process_ids)} 个"
+            text=f"{status}  检测到 {count} 个账号数据目录，运行中的微信进程：{len(self.available_process_ids)} 个"
         )
         tkinter.Label(
             self.account_picker_frame,
@@ -284,6 +285,21 @@ class Gui:
         profile = self.account_profiles[index]
         profile_id = profile.get("profile_id") or self.account_profile_store.profile_id_for_path(profile.get("account_dir", ""))
         existing = self.account_profile_store.load_secrets(profile_id)
+        if not profile.get("weixin4"):
+            legacy_key = simpledialog.askstring(
+                "数据库密钥",
+                "输入所选旧版微信账号的数据库密钥；留空则保留现有值：",
+                initialvalue=existing.get("legacy_db_key", ""), parent=self.root, show="*",
+            )
+            if legacy_key is None:
+                return
+            secrets = dict(existing)
+            if legacy_key.strip():
+                secrets["legacy_db_key"] = legacy_key.strip()
+            if secrets:
+                self.account_profile_store.save_secrets(profile_id, secrets)
+            messagebox.showinfo("密钥设置", "密钥已使用 Windows DPAPI 加密保存。", parent=self.root)
+            return
         sns_key = simpledialog.askstring(
             "Sns.db 数据库密钥",
             "输入该账号 Sns.db 的 64 位十六进制密钥；留空则保留现有值：",
@@ -336,6 +352,7 @@ class Gui:
         secrets = self.account_profile_store.load_secrets(profile_id)
         if secrets.get("legacy_db_key"):
             profile["key"] = secrets["legacy_db_key"]
+        profile["manual_db_keys"] = bool(secrets.get("sns_db_key") or secrets.get("contact_db_key"))
         self.account_info = profile
         self.account_profile_store.save_profile({
             "profile_id": profile_id,
