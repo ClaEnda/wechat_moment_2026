@@ -402,8 +402,12 @@ class Gui:
         self.next_step_button.place(relx=0.5, rely=0.94, anchor="center")
 
     def switch_account(self):
-        if self.html_exporter_thread and not self.html_exporter_thread.stop_flag:
-            messagebox.showwarning("导出进行中", "请先完成或停止当前导出任务，再切换账号。", parent=self.root)
+        if self.html_exporter_thread and self.html_exporter_thread.is_alive():
+            if self.html_exporter_thread.stop_flag:
+                message = "正在结束当前导出任务。请等进度线程退出后再切换账号，避免旧任务继续写入文件。"
+            else:
+                message = "当前账号仍在导出。请先完成导出，或点击「停止导出」并等待任务结束后再切换。"
+            messagebox.showwarning("导出任务尚未结束", message, parent=self.root)
             return
         try:
             if getattr(sys, "frozen", False):
