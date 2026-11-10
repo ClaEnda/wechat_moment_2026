@@ -77,6 +77,15 @@ class DatabaseDecrypter:
             "encrypted_source",
         )
         os.makedirs(source_snapshot_dir, exist_ok=True)
+
+        # 每次重建当前 wxid 的数据库缓存前先清除旧解密库，避免残留分片混入新快照。
+        for existing_name in os.listdir(output_dir):
+            if existing_name in self.db_list or (
+                existing_name.startswith("MSG") and existing_name.endswith(".db")
+            ):
+                existing_path = os.path.join(output_dir, existing_name)
+                if os.path.isfile(existing_path):
+                    os.remove(existing_path)
         if os.path.exists(self.db_path):
             for root, dirs, files in os.walk(self.db_path):
                 for file in files:
