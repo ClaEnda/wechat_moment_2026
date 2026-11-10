@@ -209,6 +209,39 @@ class HtmlExporter(threading.Thread):
         self._interaction_name_cache[username] = display_name
         return display_name
 
+    def _prepare_account_media_cache(self) -> None:
+        """把所选账号的本地 SNS 缓存按月份复制到该账号专属工作空间。"""
+        account = self.gui.account_info or {}
+        source_root = Path(account.get("filePath") or "") / "FileStorage" / "Sns" / "Cache"
+        target_root = Path(account.get("cacheCopyPath") or "")
+        if not str(source_root) or not source_root.is_dir() or not str(target_root):
+            return
+
+        target_root.mkdir(parents=True, exist_ok=True)
+        months = ImageDecrypter.get_all_month_between_dates(self.begin_date, self.end_date)
+        for month in months:
+            source_month = source_root / month
+            if not source_month.is_dir():
+                continue
+            target_month = target_root / month
+            target_month.mkdir(parents=True, exist_ok=True)
+            for source_file in source_month.rglob("*"):
+                if not source_file.is_file():
+                    continue
+                relative = source_file.relative_to(source_month)
+                target_file = target_month / relative
+                try:
+                    if (
+                        target_file.is_file()
+                        and target_file.stat().st_size == source_file.stat().st_size
+                        and target_file.stat().st_mtime >= source_file.stat().st_mtime
+                    ):
+                        continue
+                    target_file.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source_file, target_file)
+                except OSError:
+                    LOG.warning("复制账号 SNS 缓存失败：%s", source_file)
+
     def _load_earlier_moments(self) -> None:
         """开始日期早于本地缓存时，滚动已打开的朋友圈并重新复制数据库。"""
         account = getattr(self.gui, "account_info", None) or {}
@@ -442,6 +475,7 @@ class HtmlExporter(threading.Thread):
             datetime.datetime(end_date.year, end_date.month, end_date.day).timetuple()
         )
 
+        self._prepare_account_media_cache()
         self.gui.image_decrypter.decrypt_images(
             self, self.begin_date, end_date, self.dir_name
         )

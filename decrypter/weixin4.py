@@ -89,86 +89,168 @@ class Weixin4Error(RuntimeError):
 
 
 def probe_client() -> dict:
-    """判断当前是微信 4.x、缺少数据目录，还是可以继续走旧版检测。"""
-    if not _weixin_pids():
+    """发现同时运行的微信进程和所有本地账号目录；进程与账号目录保留人工核对入口。"""
+    pids = _weixin_pids()
+    if not pids:
         return {"state": "absent"}
-    account_dir, db_storage = _locate_account()
-    if not account_dir:
+    accounts = _iter_accounts()
+    if not accounts:
         return {
             "state": "weixin4-error",
             "message": "已发现微信 4.1，但没有找到本地数据库目录",
+            "process_ids": pids,
         }
-    return {
-        "state": "weixin4",
-        "account": {
+
+    from account_profiles import AccountProfileStore
+
+    store = AccountProfileStore()
+    saved = {p.get("account_dir"): p for p in store.load_profiles()}
+    profiles = []
+    for account_dir, db_storage in accounts:
+        folder_name = os.path.basename(account_dir.rstrip("\\\\ /"))
+        profile_id = store.profile_id_for_path(account_dir)
+        previous = saved.get(os.path.abspath(account_dir), {})
+        wxid_hint = previous.get("wxid") or (
+            folder_name if folder_name.startswith("wxid_") else ""
+        )
+        profile = {
+            "profile_id": profile_id,
             "weixin4": True,
             "filePath": account_dir,
+            "account_dir": account_dir,
             "dbStorage": db_storage,
+            "wxid": wxid_hint,
+            "displayName": previous.get("display_name") or wxid_hint or folder_name,
+            "process_ids": pids[:],
+            "availableProcessIds": pids[:],
             "key": "",
-            "wxid": "",
-        },
-    }
+        }
+        profiles.append(profile)
+    return {"state": "weixin4", "accounts": profiles, "process_ids": pids}
 
 
 def build_export_databases(account_info: dict, progress) -> None:
-    """解密朋友圈和联系人库，并写成现有导出器使用的表。"""
-    accounts = _iter_accounts()
-    pages = []
-    for _account_dir, storage in accounts:
-        for rel in (os.path.join("sns", "sns.db"), os.path.join("contact", "contact.db")):
-            path = os.path.join(storage, rel)
-            if os.path.isfile(path) and os.path.getsize(path) >= PAGE_SZ:
-                pages.append(path)
-    if not pages:
-        raise Weixin4Error("没有找到朋友圈或联系人数据库")
+    """只处理用户选中的账号；数据库密钥只在本次解密期间驻留内存。"""
+    selected_storage = account_info.get("dbStorage") or ""
+    selected_dir = account_info.get("filePath") or account_info.get("account_dir") or ""
+    if selected_storage and selected_dir and os.path.isdir(selected_storage):
+        accounts = [(selected_dir, selected_storage)]
+    else:
+        accounts = _iter_accounts()
 
-    progress(5, "正在读取已登录的微信....")
-    path_keys, stats = _extract_keys(pages, progress)
-    chosen = None
-    for account_dir, storage in accounts:
-        sns_path = os.path.join(storage, "sns", "sns.db")
-        contact_path = os.path.join(storage, "contact", "contact.db")
-        if path_keys.get(sns_path) and path_keys.get(contact_path):
-            chosen = (account_dir, storage, sns_path, contact_path)
-            break
-    if not chosen:
-        raise Weixin4Error(
-            "未能校验微信 4.1 的本地数据库。请保持微信登录，并尝试用管理员身份重新打开本工具。"
-            f"（内存区域 {stats['regions']}，特征 {stats['needles']}，候选 {stats['candidates']}，"
-            f"已匹配 {stats['matched']}）"
-        )
-    account_dir, storage, sns_path, contact_path = chosen
+    if not accounts:
+        raise Weixin4Error("没有找到所选微信账号的数据库目录")
+
+    account_dir, storage = accounts[0]
+    sns_path = os.path.join(storage, "sns", "sns.db")
+    contact_path = os.path.join(storage, "contact", "contact.db")
+    sources = {"sns": sns_path, "contact": contact_path}
+    pages = []
+    for path in sources.values():
+        if os.path.isfile(path) and os.path.getsize(path) >= PAGE_SZ:
+            pages.append(path)
+    if len(pages) != 2:
+        raise Weixin4Error("所选账号缺少朋友圈或联系人数据库")
+
     account_info["filePath"] = account_dir
+    account_info["account_dir"] = account_dir
     account_info["dbStorage"] = storage
-    key_map = {"sns": path_keys[sns_path], "contact": path_keys[contact_path]}
+
+    from account_profiles import AccountProfileStore
+
+    store = AccountProfileStore()
+    profile_id = account_info.get("profile_id") or store.profile_id_for_path(account_dir)
+    account_info["profile_id"] = profile_id
+    profile = {
+        "profile_id": profile_id,
+        "wxid": account_info.get("wxid") or "",
+        "display_name": account_info.get("displayName") or account_info.get("wxid") or "",
+        "account_dir": account_dir,
+        "db_storage": storage,
+        "weixin4": True,
+        "process_ids": account_info.get("process_ids") or _weixin_pids(),
+    }
+    store.save_profile(profile)
+    workspace = store.workspace_for(profile)
+    database_copy = workspace / "database"
+    database_copy.mkdir(parents=True, exist_ok=True)
+    account_info["workspaceDir"] = str(workspace)
+    account_info["databaseCopyPath"] = str(database_copy)
+
+    progress(5, "正在校验所选微信账号的数据库....")
+    path_keys: dict[str, bytes] = {}
+    secrets = store.load_secrets(profile_id)
+    manual = {
+        "sns": secrets.get("sns_db_key", ""),
+        "contact": secrets.get("contact_db_key", ""),
+    }
+    for name, path in sources.items():
+        raw = manual.get(name, "").strip()
+        if not raw:
+            continue
+        try:
+            candidate = bytes.fromhex(raw.removeprefix("0x").replace(" ", ""))
+        except ValueError:
+            raise Weixin4Error(f"{name} 数据库密钥格式无效")
+        with open(path, "rb") as handle:
+            page1 = handle.read(PAGE_SZ)
+        if len(candidate) != KEY_SZ or not verify_enc_key(candidate, page1):
+            raise Weixin4Error(f"{name} 数据库密钥无法通过本地数据库校验")
+        path_keys[path] = candidate
+
+    missing_paths = [path for path in sources.values() if path not in path_keys]
+    if missing_paths:
+        auto_keys, stats = _extract_keys(missing_paths, progress)
+        path_keys.update(auto_keys)
+    else:
+        stats = {"regions": 0, "needles": 0, "candidates": 0, "matched": 2}
+
+    if any(path not in path_keys for path in sources.values()):
+        raise Weixin4Error(
+            "未能校验所选微信账号的本地数据库。请确认该账号仍在登录状态，"
+            "或在账号设置中手动填写该账号的 SNS.db 和 Contact.db 密钥。"
+            f"（内存区域 {stats['regions']}，特征 {stats['needles']}，"
+            f"候选 {stats['candidates']}，已匹配 {stats['matched']}）"
+        )
 
     work = tempfile.mkdtemp(prefix="weixin4-")
     try:
         decrypted = {}
-        sources = {"sns": sns_path, "contact": contact_path}
         for index, name in enumerate(("sns", "contact")):
-            progress(45 + index * 15, "正在复制本地数据库....")
+            progress(45 + index * 15, "正在复制所选账号的本地数据库....")
             src = sources[name]
             copied = os.path.join(work, name + ".db")
             _copy_shared(src, copied)
             out_path = os.path.join(work, name + "-plain.db")
-            if not _decrypt_database(copied, out_path, key_map[name]):
+            if not _decrypt_database(copied, out_path, path_keys[src]):
                 raise Weixin4Error("本地数据库校验失败")
             wal = src + "-wal"
             if os.path.isfile(wal):
-                _apply_wal(wal, out_path, key_map[name])
+                _apply_wal(wal, out_path, path_keys[src])
             if not _quick_check(out_path):
                 raise Weixin4Error("解密后的数据库无法打开")
             decrypted[name] = out_path
-            progress(60 + index * 15, "正在整理朋友圈数据....")
-        output_dir = os.path.join("app", "DataBase", "Msg")
-        os.makedirs(output_dir, exist_ok=True)
-        wxid = _write_compatible(decrypted["sns"], decrypted["contact"], output_dir, account_dir)
-        account_info["wxid"] = wxid
-        progress(100, "复制成功，请点击下一步")
+            progress(60 + index * 15, "正在整理所选账号的朋友圈数据....")
+
+        wxid, display_name = _write_compatible(
+            decrypted["sns"], decrypted["contact"], str(database_copy), account_dir
+        )
+        account_info["wxid"] = wxid or account_info.get("wxid") or ""
+        account_info["displayName"] = display_name or account_info.get("displayName") or account_info["wxid"]
+        store.save_profile({
+            **profile,
+            "wxid": account_info["wxid"],
+            "display_name": account_info["displayName"],
+            "account_dir": account_dir,
+            "db_storage": storage,
+            "process_ids": account_info.get("process_ids") or _weixin_pids(),
+        })
+        progress(100, "所选账号数据复制成功")
     finally:
-        key_map.clear()
+        # 不写出明文密钥文件；清除本次任务的密钥引用和临时数据库副本。
         path_keys.clear()
+        manual.clear()
+        secrets.clear()
         shutil.rmtree(work, ignore_errors=True)
 
 
@@ -633,12 +715,14 @@ def _quick_check(path: str) -> bool:
     return bool(row) and row[0] == "ok"
 
 
-def _write_compatible(sns_path: str, contact_path: str, output_dir: str, account_dir: str) -> str:
+def _write_compatible(
+    sns_path: str, contact_path: str, output_dir: str, account_dir: str
+) -> tuple[str, str]:
     sns = sqlite3.connect(sns_path)
     contact = sqlite3.connect(contact_path)
     try:
         feeds, comments = _read_moments(sns)
-        people, self_name = _read_contacts(contact, account_dir)
+        people, self_name, display_name = _read_contacts(contact, account_dir)
     finally:
         sns.close()
         contact.close()
@@ -647,7 +731,7 @@ def _write_compatible(sns_path: str, contact_path: str, output_dir: str, account
     _write_sns(os.path.join(output_dir, "Sns.db"), feeds, comments)
     _write_contacts(os.path.join(output_dir, "MicroMsg.db"), people)
     _write_empty_msg(os.path.join(output_dir, "MSG.db"))
-    return self_name
+    return self_name, display_name
 
 
 def _read_moments(conn: sqlite3.Connection) -> tuple[list[tuple], list[tuple]]:
@@ -684,23 +768,34 @@ def _read_moments(conn: sqlite3.Connection) -> tuple[list[tuple], list[tuple]]:
         type_col = _pick(comment_columns, "type", "CommentType")
         text_col = _pick(comment_columns, "content", "Content")
         ctime_col = _pick(comment_columns, "create_time", "CreateTime")
+        comment_id_col = _pick(comment_columns, "comment_id", "CommentId", "id")
+        reply_user_col = _pick(
+            comment_columns, "reply_user_name", "ReplyUserName", "reply_username", "ReplyUserName"
+        )
+        reply_id_col = _pick(
+            comment_columns, "reply_id", "ReplyId", "reply_comment_id", "ReplyCommentId"
+        )
         if feed_id_col and from_col and type_col and text_col:
+            optional = [ctime_col, comment_id_col, reply_user_col, reply_id_col]
             chosen = [feed_id_col, from_col, type_col, text_col]
-            if ctime_col:
-                chosen.append(ctime_col)
+            chosen.extend(column for column in optional if column and column not in chosen)
+            column_index = {name: index for index, name in enumerate(chosen)}
             sql = "SELECT " + ", ".join(f'"{name}"' for name in chosen) + ' FROM "SnsMessage_tmp3"'
             for row in conn.execute(sql):
                 comments.append((
-                    _as_text(row[1]),
-                    _as_int(row[2]),
-                    _as_text(row[3]),
-                    _as_int(row[0]),
-                    _as_int(row[4]) if ctime_col else 0,
+                    _as_text(row[column_index[from_col]]),
+                    _as_int(row[column_index[type_col]]),
+                    _as_text(row[column_index[text_col]]),
+                    _as_int(row[column_index[feed_id_col]]),
+                    _as_int(row[column_index[ctime_col]]) if ctime_col else 0,
+                    _as_text(row[column_index[comment_id_col]]) if comment_id_col else "",
+                    _as_text(row[column_index[reply_user_col]]) if reply_user_col else "",
+                    _as_text(row[column_index[reply_id_col]]) if reply_id_col else "",
                 ))
     return feeds, comments
 
 
-def _read_contacts(conn: sqlite3.Connection, account_dir: str) -> tuple[list[tuple], str]:
+def _read_contacts(conn: sqlite3.Connection, account_dir: str) -> tuple[list[tuple], str, str]:
     tables = _table_names(conn)
     table = "contact" if "contact" in tables else ("Contact" if "Contact" in tables else "")
     if not table:
@@ -723,6 +818,7 @@ def _read_contacts(conn: sqlite3.Connection, account_dir: str) -> tuple[list[tup
     folder = os.path.basename(account_dir)
     people = []
     self_name = ""
+    self_display_name = ""
     seen = set()
     for row in conn.execute(sql):
         username = _as_text(row[index[user_col]]).strip()
@@ -748,7 +844,9 @@ def _read_contacts(conn: sqlite3.Connection, account_dir: str) -> tuple[list[tup
         ))
         if (folder == username or folder.startswith(username + "_")) and len(username) > len(self_name):
             self_name = username
-    return people, self_name
+            self_display_name = _as_text(row[index[remark_col]]) if remark_col else ""
+            self_display_name = self_display_name.strip() or nickname or username
+    return people, self_name, self_display_name
 
 
 def _write_sns(path: str, feeds: list[tuple], comments: list[tuple]) -> None:
@@ -761,12 +859,12 @@ def _write_sns(path: str, feeds: list[tuple], comments: list[tuple]) -> None:
         )
         conn.execute(
             "CREATE TABLE CommentV20 (FromUserName TEXT, CommentType INTEGER, Content TEXT, "
-            "FeedId INTEGER, CreateTime INTEGER)"
+            "FeedId INTEGER, CreateTime INTEGER, CommentId TEXT, ReplyUserName TEXT, ReplyId TEXT)"
         )
         conn.execute('CREATE TABLE SnsConfigV20 ("Key" TEXT, StrValue TEXT)')
         conn.executemany("INSERT INTO FeedsV20 VALUES (?,?,?,?)", feeds)
         if comments:
-            conn.executemany("INSERT INTO CommentV20 VALUES (?,?,?,?,?)", comments)
+            conn.executemany("INSERT INTO CommentV20 VALUES (?,?,?,?,?,?,?,?)", comments)
         conn.commit()
     finally:
         conn.close()
