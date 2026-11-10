@@ -172,6 +172,94 @@ def build_export_databases(account_info: dict, progress) -> None:
         shutil.rmtree(work, ignore_errors=True)
 
 
+def build_export_databases_with_manual_keys(
+    account_info: dict,
+    db_keys: dict[str, str],
+    profile_cache_dir: str,
+    progress,
+) -> None:
+    """
+    使用用户为该账号明确提供的数据库密钥，解密到该 wxid 独立缓存。
+
+    本函数不枚举进程、不读取进程内存，也不自行寻找或导出任何密钥。
+    """
+    account_dir = os.path.abspath(str(account_info.get("filePath") or ""))
+    storage = str(account_info.get("dbStorage") or "").strip()
+    if not account_dir or not os.path.isdir(account_dir):
+        raise Weixin4Error("账号数据目录不存在，请重新选择该微信实例对应的目录")
+    if not storage:
+        storage = os.path.join(account_dir, "db_storage")
+    storage = os.path.abspath(storage)
+    if not os.path.isdir(storage):
+        raise Weixin4Error("没有找到该账号的 db_storage 目录")
+
+    def parse_key(name: str) -> bytes:
+        value = str(db_keys.get(name) or "").strip().replace(" ", "")
+        try:
+            key = bytes.fromhex(value)
+        except ValueError as exc:
+            raise Weixin4Error(f"{name} 必须是 64 位十六进制数据库密钥") from exc
+        if len(key) != KEY_SZ:
+            raise Weixin4Error(f"{name} 必须是 32 字节（64 位十六进制）数据库密钥")
+        return key
+
+    keys = {
+        "sns": parse_key("sns_db_key"),
+        "contact": parse_key("contact_db_key"),
+    }
+    os.makedirs(profile_cache_dir, exist_ok=True)
+    source_cache = os.path.join(profile_cache_dir, "encrypted_source")
+    plain_cache = os.path.join(profile_cache_dir, "database")
+    os.makedirs(source_cache, exist_ok=True)
+    os.makedirs(plain_cache, exist_ok=True)
+
+    sources = {
+        "sns": os.path.join(storage, "sns", "sns.db"),
+        "contact": os.path.join(storage, "contact", "contact.db"),
+    }
+    decrypted = {}
+    for index, name in enumerate(("sns", "contact")):
+        src = sources[name]
+        if not os.path.isfile(src):
+            raise Weixin4Error(f"该账号缺少 {name} 数据库：{src}")
+
+        progress(10 + index * 30, f"正在复制所选账号的 {name} 数据库....")
+        snapshot = os.path.join(source_cache, name + ".db")
+        _copy_shared(src, snapshot)
+
+        wal_source = src + "-wal"
+        wal_snapshot = snapshot + "-wal"
+        if os.path.isfile(wal_source):
+            _copy_shared(wal_source, wal_snapshot)
+        shm_source = src + "-shm"
+        if os.path.isfile(shm_source):
+            _copy_shared(shm_source, snapshot + "-shm")
+
+        plain_path = os.path.join(plain_cache, name + "-plain.db")
+        if os.path.exists(plain_path):
+            os.remove(plain_path)
+        if not _decrypt_database(snapshot, plain_path, keys[name]):
+            raise Weixin4Error(f"{name} 数据库密钥与所选账号不匹配")
+        if os.path.isfile(wal_snapshot):
+            _apply_wal(wal_snapshot, plain_path, keys[name])
+        if not _quick_check(plain_path):
+            raise Weixin4Error(f"{name} 解密后的数据库检查失败")
+        decrypted[name] = plain_path
+        progress(35 + index * 25, f"{name} 数据库已校验")
+
+    wxid = _write_compatible(
+        decrypted["sns"],
+        decrypted["contact"],
+        plain_cache,
+        account_dir,
+    )
+    if wxid:
+        account_info["wxid"] = wxid
+    account_info["dbStorage"] = storage
+    account_info["databaseDir"] = plain_cache
+    progress(100, "该账号的数据已复制并整理到独立缓存")
+
+
 def _weixin_pids() -> list[int]:
     result = subprocess.run(
         ["tasklist", "/FI", "IMAGENAME eq Weixin.exe", "/FO", "CSV", "/NH"],
@@ -685,17 +773,24 @@ def _read_moments(conn: sqlite3.Connection) -> tuple[list[tuple], list[tuple]]:
         text_col = _pick(comment_columns, "content", "Content")
         ctime_col = _pick(comment_columns, "create_time", "CreateTime")
         if feed_id_col and from_col and type_col and text_col:
+            comment_id_col = _pick(comment_columns, "comment_id", "CommentId")
+            reply_user_col = _pick(comment_columns, "reply_username", "ReplyUserName")
+            reply_id_col = _pick(comment_columns, "reply_id", "ReplyId")
             chosen = [feed_id_col, from_col, type_col, text_col]
-            if ctime_col:
-                chosen.append(ctime_col)
+            optional = [ctime_col, comment_id_col, reply_user_col, reply_id_col]
+            chosen.extend(name for name in optional if name)
             sql = "SELECT " + ", ".join(f'"{name}"' for name in chosen) + ' FROM "SnsMessage_tmp3"'
+            positions = {name: index for index, name in enumerate(chosen)}
             for row in conn.execute(sql):
                 comments.append((
-                    _as_text(row[1]),
-                    _as_int(row[2]),
-                    _as_text(row[3]),
-                    _as_int(row[0]),
-                    _as_int(row[4]) if ctime_col else 0,
+                    _as_text(row[positions[from_col]]),
+                    _as_int(row[positions[type_col]]),
+                    _as_text(row[positions[text_col]]),
+                    _as_int(row[positions[feed_id_col]]),
+                    _as_int(row[positions[ctime_col]]) if ctime_col else 0,
+                    _as_text(row[positions[comment_id_col]]) if comment_id_col else "",
+                    _as_text(row[positions[reply_user_col]]) if reply_user_col else "",
+                    _as_text(row[positions[reply_id_col]]) if reply_id_col else "",
                 ))
     return feeds, comments
 
@@ -761,12 +856,17 @@ def _write_sns(path: str, feeds: list[tuple], comments: list[tuple]) -> None:
         )
         conn.execute(
             "CREATE TABLE CommentV20 (FromUserName TEXT, CommentType INTEGER, Content TEXT, "
-            "FeedId INTEGER, CreateTime INTEGER)"
+            "FeedId INTEGER, CreateTime INTEGER, CommentId TEXT, ReplyUserName TEXT, ReplyId TEXT)"
         )
         conn.execute('CREATE TABLE SnsConfigV20 ("Key" TEXT, StrValue TEXT)')
         conn.executemany("INSERT INTO FeedsV20 VALUES (?,?,?,?)", feeds)
         if comments:
-            conn.executemany("INSERT INTO CommentV20 VALUES (?,?,?,?,?)", comments)
+            normalized = []
+            for item in comments:
+                values = list(item[:8])
+                values.extend([""] * (8 - len(values)))
+                normalized.append(tuple(values))
+            conn.executemany("INSERT INTO CommentV20 VALUES (?,?,?,?,?,?,?,?)", normalized)
         conn.commit()
     finally:
         conn.close()
