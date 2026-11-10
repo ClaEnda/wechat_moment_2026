@@ -766,18 +766,29 @@ def _read_moments(conn: sqlite3.Connection) -> tuple[list[tuple], list[tuple]]:
         type_col = _pick(comment_columns, "type", "CommentType")
         text_col = _pick(comment_columns, "content", "Content")
         ctime_col = _pick(comment_columns, "create_time", "CreateTime")
+        comment_id_col = _pick(comment_columns, "comment_id", "CommentId", "id")
+        reply_user_col = _pick(
+            comment_columns, "reply_user_name", "ReplyUserName", "reply_username", "ReplyUserName"
+        )
+        reply_id_col = _pick(
+            comment_columns, "reply_id", "ReplyId", "reply_comment_id", "ReplyCommentId"
+        )
         if feed_id_col and from_col and type_col and text_col:
+            optional = [ctime_col, comment_id_col, reply_user_col, reply_id_col]
             chosen = [feed_id_col, from_col, type_col, text_col]
-            if ctime_col:
-                chosen.append(ctime_col)
+            chosen.extend(column for column in optional if column and column not in chosen)
+            column_index = {name: index for index, name in enumerate(chosen)}
             sql = "SELECT " + ", ".join(f'"{name}"' for name in chosen) + ' FROM "SnsMessage_tmp3"'
             for row in conn.execute(sql):
                 comments.append((
-                    _as_text(row[1]),
-                    _as_int(row[2]),
-                    _as_text(row[3]),
-                    _as_int(row[0]),
-                    _as_int(row[4]) if ctime_col else 0,
+                    _as_text(row[column_index[from_col]]),
+                    _as_int(row[column_index[type_col]]),
+                    _as_text(row[column_index[text_col]]),
+                    _as_int(row[column_index[feed_id_col]]),
+                    _as_int(row[column_index[ctime_col]]) if ctime_col else 0,
+                    _as_text(row[column_index[comment_id_col]]) if comment_id_col else "",
+                    _as_text(row[column_index[reply_user_col]]) if reply_user_col else "",
+                    _as_text(row[column_index[reply_id_col]]) if reply_id_col else "",
                 ))
     return feeds, comments
 
@@ -846,12 +857,12 @@ def _write_sns(path: str, feeds: list[tuple], comments: list[tuple]) -> None:
         )
         conn.execute(
             "CREATE TABLE CommentV20 (FromUserName TEXT, CommentType INTEGER, Content TEXT, "
-            "FeedId INTEGER, CreateTime INTEGER)"
+            "FeedId INTEGER, CreateTime INTEGER, CommentId TEXT, ReplyUserName TEXT, ReplyId TEXT)"
         )
         conn.execute('CREATE TABLE SnsConfigV20 ("Key" TEXT, StrValue TEXT)')
         conn.executemany("INSERT INTO FeedsV20 VALUES (?,?,?,?)", feeds)
         if comments:
-            conn.executemany("INSERT INTO CommentV20 VALUES (?,?,?,?,?)", comments)
+            conn.executemany("INSERT INTO CommentV20 VALUES (?,?,?,?,?,?,?,?)", comments)
         conn.commit()
     finally:
         conn.close()
