@@ -13,6 +13,10 @@ class DatabaseDecrypter:
         self.db_path = db_path
         self.key = key
         self.gui = gui
+        account_info = getattr(gui, "account_info", None) or {}
+        self.output_dir = account_info.get("databaseDir") or os.path.join(
+            account_info.get("profileCacheDir") or "account_cache", "database"
+        )
         # 指定需要解密的数据库
         self.db_list = ["MicroMsg.db", "Misc.db", "MSG.db", "Sns.db"]
         self.db_list.extend([f"MSG{i}.db" for i in range(0, 50)])
@@ -64,7 +68,7 @@ class DatabaseDecrypter:
         if self.gui.account_info and self.gui.account_info.get("weixin4"):
             return self._decrypt_weixin4()
 
-        output_dir = 'app/DataBase/Msg'
+        output_dir = self.output_dir
         os.makedirs(output_dir, exist_ok=True)
         tasks = []
         if os.path.exists(self.db_path):
@@ -81,14 +85,14 @@ class DatabaseDecrypter:
             progress = round((i+1) / len(tasks) * 100)
             self.gui.update_decrypt_progressbar(progress)
 
-        target_database = "app/DataBase/Msg/MSG.db"
+        target_database = os.path.join(output_dir, "MSG.db")
         # 源数据库文件列表
-        source_databases = [f"app/DataBase/Msg/MSG{i}.db" for i in range(0, 50)]
+        source_databases = [os.path.join(output_dir, f"MSG{i}.db") for i in range(0, 50)]
         import shutil
         if os.path.exists(target_database):
             os.remove(target_database)
         try:
-            shutil.copy2("app/DataBase/Msg/MSG0.db", target_database)  # 使用一个数据库文件作为模板
+            shutil.copy2(os.path.join(output_dir, "MSG0.db"), target_database)  # 使用一个数据库文件作为模板
         except FileNotFoundError:
             LOG.error(traceback.format_exc())
         # 合并数据库
@@ -104,7 +108,7 @@ class DatabaseDecrypter:
         return True
 
     def _decrypt_weixin4(self) -> bool:
-        from decrypter.weixin4 import Weixin4Error, build_export_databases
+        from decrypter.weixin4 import Weixin4Error, build_export_databases_with_manual_keys
 
         def progress(value, text):
             self.gui.update_decrypt_progressbar(value)
@@ -112,7 +116,17 @@ class DatabaseDecrypter:
                 self.gui.decrypt_note_text.set(text)
 
         try:
-            build_export_databases(self.gui.account_info, progress)
+            account_info = self.gui.account_info or {}
+            manual_keys = account_info.get("manual_keys") or {}
+            if not manual_keys.get("sns_db_key") or not manual_keys.get("contact_db_key"):
+                raise Weixin4Error("该微信 4.x 账号尚未配置数据库密钥，请在账号档案中手动填写")
+            build_export_databases_with_manual_keys(
+                account_info,
+                manual_keys,
+                account_info.get("profileCacheDir") or self.output_dir,
+                progress,
+            )
+            self.output_dir = account_info.get("databaseDir") or self.output_dir
         except Weixin4Error as exc:
             LOG.error(str(exc))
             self.gui.decrypt_note_text.set(str(exc))
