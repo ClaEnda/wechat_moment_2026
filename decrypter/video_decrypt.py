@@ -13,10 +13,10 @@ import log
 
 class VideoDecrypter:
 
-    def __init__(self, gui: 'Gui', file_path):
+    def __init__(self, gui: 'Gui', file_path, cache_path=None):
         self.file_path = file_path
         self.gui = gui
-        self.sns_cache_path = file_path + "/FileStorage/Sns/Cache"
+        self.sns_cache_path = cache_path or os.path.join(file_path, "FileStorage", "Sns", "Cache")
 
     @staticmethod
     def get_ffmpeg_path():
