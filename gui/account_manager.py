@@ -177,9 +177,11 @@ def choose_account_profile(parent=None):
 
         def save():
             profile = {key: var.get().strip() for key, var in variables.items()}
-            profile["process_ids"] = [
-                part.strip() for part in variables["process_ids"].get().split(",") if part.strip()
-            ]
+            pid_text = variables["process_ids"].get().strip()
+            if "," in pid_text or ";" in pid_text:
+                messagebox.showerror("PID 格式错误", "一个账号档案只绑定一个主进程 PID，请为其他微信实例分别建立档案。", parent=win)
+                return
+            profile["process_ids"] = [pid_text] if pid_text else []
             version = profile["wechat_version"]
             secrets = {key: var.get().strip() for key, var in secret_vars.items() if var.get().strip()}
             if version == "4.x":
