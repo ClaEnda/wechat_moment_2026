@@ -116,10 +116,16 @@ class DatabaseDecrypter:
             progress = round((i+1) / len(tasks) * 100)
             self.gui.update_decrypt_progressbar(progress)
 
+        for required_name in ("MicroMsg.db", "Sns.db", "MSG0.db"):
+            required_path = os.path.join(output_dir, required_name)
+            if not os.path.isfile(required_path) or os.path.getsize(required_path) == 0:
+                raise RuntimeError(
+                    f"{required_name} 解密失败或文件缺失，请核对所选账号目录和手动输入的数据库密钥"
+                )
+
         target_database = os.path.join(output_dir, "MSG.db")
         # 源数据库文件列表
         source_databases = [os.path.join(output_dir, f"MSG{i}.db") for i in range(0, 50)]
-        import shutil
         if os.path.exists(target_database):
             os.remove(target_database)
         try:
