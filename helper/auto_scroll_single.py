@@ -7,7 +7,7 @@ import pyperclip
 import win32con
 import win32gui
 
-from helper.moments_window import find_moments_window
+from helper.moments_window import find_moments_window, find_window_by_class_pid
 from retry import retry
 from win32api import GetSystemMetrics
 
@@ -16,10 +16,11 @@ import log
 
 class AutoScrollSingle(threading.Thread):
 
-    def __init__(self, gui, search_hwnd, friend_name):
+    def __init__(self, gui, search_hwnd, friend_name, target_pid=None):
         self.gui = gui
         self.search_hwnd = search_hwnd
         self.friend_name = friend_name
+        self.target_pid = target_pid
         self.scrolling = False
         self.resolutions = ['', '1920', '1600', '2560_125', '2560_175', '2560_100', '1366']
         super().__init__()
@@ -100,8 +101,10 @@ class AutoScrollSingle(threading.Thread):
         self.scrolling = True
 
         try:
-            search_hwnd = win32gui.FindWindow('Chrome_WidgetWin_0', '微信')
-            wechat_hwnd = win32gui.FindWindow('WeChatMainWndForPC', '微信')
+            search_hwnd = find_window_by_class_pid("Chrome_WidgetWin_0", "微信", self.target_pid)
+            wechat_hwnd = find_window_by_class_pid("WeChatMainWndForPC", "微信", self.target_pid)
+            if not search_hwnd or not wechat_hwnd:
+                raise RuntimeError("没有找到所选 PID 对应的微信搜索窗口和主窗口，请检查账号档案中的 PID")
 
             # 先把微信主窗口放置前台
             win32gui.SetForegroundWindow(wechat_hwnd)
@@ -180,8 +183,8 @@ class AutoScrollSingle(threading.Thread):
                 pyautogui.click(right_bottom)
                 time.sleep(0.2)
 
-                search_hwnd = win32gui.FindWindow('Chrome_WidgetWin_0', '微信')
-                moments_hwnd = find_moments_window()
+                search_hwnd = find_window_by_class_pid("Chrome_WidgetWin_0", "微信", self.target_pid)
+                moments_hwnd = find_moments_window(self.target_pid)
 
                 if search_hwnd and moments_hwnd:
                     # 调整位置朋友圈不要遮挡
