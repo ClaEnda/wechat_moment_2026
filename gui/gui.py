@@ -229,9 +229,14 @@ class Gui:
             # 不再有下一步按钮
             self.next_step_button.place_forget()
             # 初始化视频导出器
-            self.video_decrypter = VideoDecrypter(self, self.account_info.get("filePath"))
+            media_cache_dir = (self.account_info or {}).get("mediaCacheDir")
+            self.video_decrypter = VideoDecrypter(
+                self, self.account_info.get("filePath"), cache_path=media_cache_dir
+            )
             # 初始化图片导出器
-            self.image_decrypter = ImageDecrypter(self, self.account_info.get("filePath"))
+            self.image_decrypter = ImageDecrypter(
+                self, self.account_info.get("filePath"), cache_path=media_cache_dir
+            )
             self.page_stage = 4
 
     def init_export_page(self):

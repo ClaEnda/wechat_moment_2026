@@ -255,6 +255,7 @@ def choose_account_profile(parent=None):
                 "display_name": profile["display_name"],
                 "profileCacheDir": cache_dir,
                 "databaseDir": os.path.join(cache_dir, "database"),
+                "mediaCacheDir": os.path.join(cache_dir, "media_cache"),
                 "manual_keys": secrets,
                 "key": secrets.get("legacy_db_key", ""),
                 "process_ids": profile.get("process_ids", []),
